@@ -37,18 +37,39 @@ def border_connected_background(
     seed_threshold: float = 12.0,
     grow_threshold: float = 80.0,
     border_width: int = 24,
+    outline_luma_threshold: float = 160.0,
+    outline_gap_pixels: int = 2,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return only background-like pixels reachable from the canvas border.
 
     A global color key is unsafe because skin, collars, highlights, and antialiased
     linework may resemble the background. Connectivity makes those enclosed pixels
-    foreground even when their color is close to the sampled matte.
+    foreground even when their color is close to the sampled matte. A temporary
+    dark-line barrier closes only tiny compression gaps while computing
+    reachability. It does not dilate or recolor the returned foreground.
     """
     if seed_threshold <= 0 or grow_threshold < seed_threshold:
         raise ValueError("require 0 < seed_threshold <= grow_threshold")
     key = sample_border_key(rgb, border_width)
     distance = np.linalg.norm(rgb.astype(np.float32) - key, axis=2)
     growable = distance <= grow_threshold
+
+    if outline_gap_pixels < 0:
+        raise ValueError("outline_gap_pixels must be non-negative")
+    if outline_gap_pixels:
+        rgb_float = rgb.astype(np.float32)
+        luminance = (
+            0.2126 * rgb_float[:, :, 0]
+            + 0.7152 * rgb_float[:, :, 1]
+            + 0.0722 * rgb_float[:, :, 2]
+        )
+        confirmed_outline = (luminance <= outline_luma_threshold) & ~growable
+        kernel_size = outline_gap_pixels * 2 + 1
+        outline_barrier = ndimage.binary_closing(
+            confirmed_outline,
+            structure=np.ones((kernel_size, kernel_size), dtype=bool),
+        )
+        growable &= ~outline_barrier
     seeds = np.zeros(distance.shape, dtype=bool)
     seed_like = distance <= seed_threshold
     seeds[0, :] = seed_like[0, :]
@@ -65,6 +86,8 @@ def extract_protected_foreground(
     seed_threshold: float = 12.0,
     grow_threshold: float = 80.0,
     border_width: int = 24,
+    outline_luma_threshold: float = 160.0,
+    outline_gap_pixels: int = 2,
 ) -> BackgroundResult:
     """Extract foreground without erosion, component deletion, or RGB rewriting."""
     background, _, key = border_connected_background(
@@ -72,6 +95,8 @@ def extract_protected_foreground(
         seed_threshold=seed_threshold,
         grow_threshold=grow_threshold,
         border_width=border_width,
+        outline_luma_threshold=outline_luma_threshold,
+        outline_gap_pixels=outline_gap_pixels,
     )
     foreground = ~background
     _, components = ndimage.label(foreground)

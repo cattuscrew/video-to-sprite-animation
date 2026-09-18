@@ -20,11 +20,12 @@ Validation must refuse missing, unapproved, rejected, or circular authority.
 1. Decode the approved pose at native video resolution.
 2. Sample the matte from the outer border.
 3. Seed background only from matte-like border pixels.
-4. Grow background only through connected matte-like pixels. Similar-colored skin, collars, highlights, or antialiasing enclosed by the character remain foreground.
-5. Preserve all residual foreground components. Unexpected components are a review failure, not permission to silently keep only the largest component.
-6. Apply no erosion, silhouette closing, foreground feathering, nearest-interior RGB extension, or generative repainting.
-7. Resize RGBA once with premultiplied-alpha resampling.
-8. Apply one shared scale and integer translation. Do not independently recenter frames.
+4. Build a temporary connectivity barrier from confirmed dark outline pixels. Close only tiny one- or two-pixel compression gaps in that barrier; do not dilate the output silhouette or alter RGB. Keep genuinely open gaps open and cover both behaviors with regression tests.
+5. Grow background only through connected matte-like pixels outside that barrier. Similar-colored skin, collars, highlights, under-chin skin, armpits, or antialiasing enclosed by the character remain foreground.
+6. Preserve all residual foreground components. Unexpected components are a review failure, not permission to silently keep only the largest component.
+7. Apply no erosion, output-silhouette closing, foreground feathering, nearest-interior RGB extension, or generative repainting.
+8. Resize RGBA once with premultiplied-alpha resampling.
+9. Apply one shared scale and integer translation. Do not independently recenter frames.
 
 Use `scripts/extract_protected_foreground.py` for this branch.
 

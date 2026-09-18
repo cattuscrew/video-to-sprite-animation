@@ -50,7 +50,7 @@ Pause after the canonical master when applicable, after the proof frame, after k
 - The canonical original/native source is authority in faithful extraction; the approved canonical master is authority in regeneration.
 - Authority provenance is mandatory and cannot point to a rejected or derivative output.
 - Background removal occurs at native resolution before scaling.
-- In faithful extraction, never use global color similarity alone, largest-component deletion, silhouette erosion, foreground feathering, nearest-interior edge recoloring, or GPT-generated masks/RGB as production authority.
+- In faithful extraction, never use global color similarity alone, largest-component deletion, silhouette erosion, foreground feathering, nearest-interior edge recoloring, or GPT-generated masks/RGB as production authority. Stabilize flood connectivity with a temporary dark-outline barrier that closes only tiny compression gaps; never apply that closing to the output silhouette.
 - GPT Image may be diagnostic in faithful extraction; it may not subtract protected pixels, control geometry, or replace source RGB.
 - Canvas, camera, scale, ground line, and numerical pivot are shared.
 - Prompt coordinates are advisory; enforce the contract deterministically.

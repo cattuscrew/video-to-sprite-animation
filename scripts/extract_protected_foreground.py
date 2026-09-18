@@ -44,6 +44,8 @@ def main() -> None:
     parser.add_argument("--seed-threshold", type=float, default=12.0)
     parser.add_argument("--grow-threshold", type=float, default=80.0)
     parser.add_argument("--border-width", type=int, default=24)
+    parser.add_argument("--outline-luma-threshold", type=float, default=160.0)
+    parser.add_argument("--outline-gap-pixels", type=int, default=2)
     args = parser.parse_args()
 
     files = sorted(args.input_dir.glob("*.png"))
@@ -60,6 +62,8 @@ def main() -> None:
             seed_threshold=args.seed_threshold,
             grow_threshold=args.grow_threshold,
             border_width=args.border_width,
+            outline_luma_threshold=args.outline_luma_threshold,
+            outline_gap_pixels=args.outline_gap_pixels,
         )
         resized_size = (round(source.width * args.scale), round(source.height * args.scale))
         resized = resize_rgba_premultiplied(result.rgba, resized_size)
@@ -79,6 +83,8 @@ def main() -> None:
                 "keyColor": list(result.key_rgb),
                 "seedThreshold": args.seed_threshold,
                 "growThreshold": args.grow_threshold,
+                "outlineLumaThreshold": args.outline_luma_threshold,
+                "outlineGapPixels": args.outline_gap_pixels,
                 "foregroundComponents": result.foreground_components,
                 "visibleBounds": bounds,
                 "contactPivot": pivot,
@@ -102,6 +108,8 @@ def main() -> None:
             "seedThreshold": args.seed_threshold,
             "growThreshold": args.grow_threshold,
             "borderWidth": args.border_width,
+            "outlineLumaThreshold": args.outline_luma_threshold,
+            "outlineGapPixels": args.outline_gap_pixels,
         },
         "frames": records,
     }

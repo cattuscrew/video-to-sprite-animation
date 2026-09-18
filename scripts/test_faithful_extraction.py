@@ -34,6 +34,14 @@ class FaithfulExtractionRegressionTests(unittest.TestCase):
         result = extract_protected_foreground(image)
         self.assertEqual(int(result.rgba[25, 32, 3]), 0)
 
+    def test_two_pixel_compression_gap_does_not_leak_into_enclosed_skin(self) -> None:
+        image = np.full((64, 64, 3), self.background, dtype=np.uint8)
+        image[12:52, 12:52] = [10, 10, 10]
+        image[14:50, 14:50] = [238, 218, 202]
+        image[12, 31:33] = self.background
+        result = extract_protected_foreground(image)
+        self.assertEqual(int(result.rgba[30, 32, 3]), 255)
+
     def test_dark_outline_and_source_rgb_survive(self) -> None:
         image = np.full((64, 64, 3), self.background, dtype=np.uint8)
         image[20:44, 20:44] = [8, 9, 10]
