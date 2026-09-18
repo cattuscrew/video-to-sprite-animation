@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video to Sprite Animation"
+  short_description: "Convert videos into stable sprite animations"
+  default_prompt: "Use $video-to-sprite-animation to find and preview a stable loop, confirm FPS/range/canvas, then create aligned transparent sprite frames with contract validation."
