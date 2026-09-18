@@ -95,14 +95,14 @@ def resize_rgba_premultiplied(rgba: np.ndarray, size: tuple[int, int]) -> np.nda
     premultiplied = rgba[:, :, :3].astype(np.float32) * alpha[:, :, None]
 
     resized_alpha = np.asarray(
-        Image.fromarray(alpha, "F").resize(size, Image.Resampling.LANCZOS),
+        Image.fromarray(alpha, "F").resize(size, Image.Resampling.BICUBIC),
         dtype=np.float32,
     )
     resized_premultiplied = np.stack(
         [
             np.asarray(
                 Image.fromarray(premultiplied[:, :, channel], "F").resize(
-                    size, Image.Resampling.LANCZOS
+                    size, Image.Resampling.BICUBIC
                 ),
                 dtype=np.float32,
             )
