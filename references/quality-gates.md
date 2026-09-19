@@ -42,6 +42,10 @@ Inspect at normal speed, slow speed, and as previous/current/next triplets. Use:
 
 Root alignment passing does not prove temporal consistency. Separately inspect head, pelvis, shoulders, hands, equipment centers, silhouette, and line-weight stability.
 
+Run `scripts/validate_temporal_sequence.py` before acceptance. Inspect its duplicate-frame ratio, longest hold run, adjacent-motion spikes, loop-seam score, locked-region deltas, negative-space probes, and semantic-state matches. A sequence with excessive holds or redraw popping fails even when every still frame looks acceptable.
+
+For regenerative work, compare each timeline frame with the approved canonical master and the previous/current/next triplet. Treat unexpected local color or silhouette changes as redraw drift. Common examples include filled gaps between hair and shoulder, changing eye construction, shifting equipment details, and independently redrawn outlines.
+
 Bounds, pivot, palette mean, mask IoU, and aggregate edge density are supporting metrics only. They cannot accept a frame that fails protected-pixel, topology, outline, semantic-region, or provenance checks.
 
 ## Repair visibility

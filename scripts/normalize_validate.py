@@ -22,6 +22,13 @@ def parse_pair(value: str) -> tuple[int, int]:
     return parts[0], parts[1]
 
 
+def parse_rect(value: str) -> tuple[int, int, int, int]:
+    parts = [int(part.strip()) for part in value.split(",")]
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("expected x,y,width,height")
+    return parts[0], parts[1], parts[2], parts[3]
+
+
 def visible_bbox(image: Image.Image, threshold: int = 18) -> tuple[int, int, int, int]:
     alpha = np.asarray(image.getchannel("A"))
     ys, xs = np.nonzero(alpha > threshold)
@@ -38,6 +45,27 @@ def contact_pivot(image: Image.Image, threshold: int = 18) -> tuple[float, int]:
     bottom = int(ys.max())
     contact_x = xs[ys >= bottom - 8]
     return float(contact_x.min() + contact_x.max()) / 2.0, bottom
+
+
+def configured_pivot(
+    image: Image.Image,
+    left_rect: tuple[int, int, int, int] | None,
+    right_rect: tuple[int, int, int, int] | None,
+    threshold: int = 18,
+) -> tuple[float, int]:
+    if not left_rect or not right_rect:
+        return contact_pivot(image, threshold)
+    alpha = np.asarray(image.getchannel("A"))
+    contacts: list[tuple[float, int]] = []
+    for x, y, width, height in (left_rect, right_rect):
+        patch = alpha[y : y + height, x : x + width]
+        ys, xs = np.nonzero(patch > threshold)
+        if len(xs) == 0:
+            raise ValueError("foot region contains no visible pixels")
+        bottom = int(ys.max())
+        contact = xs[ys >= bottom - 5] + x
+        contacts.append((float(contact.min() + contact.max()) / 2.0, y + bottom))
+    return (contacts[0][0] + contacts[1][0]) / 2.0, max(value[1] for value in contacts)
 
 
 def clean_alpha(image: Image.Image) -> tuple[Image.Image, int]:
@@ -93,6 +121,13 @@ def main() -> None:
     parser.add_argument("--fit-height", type=int, help="Visible master height on final canvas")
     parser.add_argument("--fps", type=int, default=12)
     parser.add_argument("--order", help="Comma-separated 1-based playback frame numbers")
+    parser.add_argument(
+        "--allow-per-frame-root-registration",
+        action="store_true",
+        help="Explicitly allow per-frame translation to the target pivot; disabled by default",
+    )
+    parser.add_argument("--left-foot-region", type=parse_rect)
+    parser.add_argument("--right-foot-region", type=parse_rect)
     args = parser.parse_args()
 
     files = sorted(path for path in args.input_dir.glob("*.png") if path.is_file())
@@ -111,6 +146,19 @@ def main() -> None:
     master_visible_height = master_bbox[3] - master_bbox[1]
     scale = fit_height / master_visible_height
     master_size = master.size
+    if bool(args.left_foot_region) != bool(args.right_foot_region):
+        raise SystemExit("--left-foot-region and --right-foot-region must be supplied together")
+    resized_master = master.resize(
+        (max(1, round(master.width * scale)), max(1, round(master.height * scale))),
+        Image.Resampling.LANCZOS,
+    )
+    scaled_left = tuple(round(value * scale) for value in args.left_foot_region) if args.left_foot_region else None
+    scaled_right = tuple(round(value * scale) for value in args.right_foot_region) if args.right_foot_region else None
+    master_pivot = configured_pivot(resized_master, scaled_left, scaled_right)
+    shared_offset = (
+        round(target_pivot[0] - master_pivot[0]),
+        round(target_pivot[1] - master_pivot[1]),
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     frames: list[Image.Image] = []
@@ -126,14 +174,27 @@ def main() -> None:
             (max(1, round(source.width * scale)), max(1, round(source.height * scale))),
             Image.Resampling.LANCZOS,
         )
-        source_pivot = contact_pivot(resized)
-        offset_x = round(target_pivot[0] - source_pivot[0])
-        offset_y = round(target_pivot[1] - source_pivot[1])
+        source_pivot = configured_pivot(resized, scaled_left, scaled_right)
+        if args.allow_per_frame_root_registration:
+            offset_x = round(target_pivot[0] - source_pivot[0])
+            offset_y = round(target_pivot[1] - source_pivot[1])
+        else:
+            offset_x, offset_y = shared_offset
         canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
         canvas.alpha_composite(resized, (offset_x, offset_y))
         canvas, post_contaminated = clean_alpha(canvas)
         bbox = visible_bbox(canvas)
-        final_pivot = contact_pivot(canvas)
+        translated_left = (
+            (scaled_left[0] + offset_x, scaled_left[1] + offset_y, scaled_left[2], scaled_left[3])
+            if scaled_left
+            else None
+        )
+        translated_right = (
+            (scaled_right[0] + offset_x, scaled_right[1] + offset_y, scaled_right[2], scaled_right[3])
+            if scaled_right
+            else None
+        )
+        final_pivot = configured_pivot(canvas, translated_left, translated_right)
         margins = {
             "left": bbox[0],
             "top": bbox[1],
@@ -210,6 +271,15 @@ def main() -> None:
         "targetPivot": list(target_pivot),
         "master": str(master_path),
         "sharedScale": scale,
+        "sharedTranslation": list(shared_offset),
+        "registrationMode": (
+            "explicit-per-frame-root-registration"
+            if args.allow_per_frame_root_registration
+            else "shared-master-derived-translation"
+        ),
+        "pivotMeasurement": (
+            "two-foot-anatomical" if scaled_left and scaled_right else "lowest-contact"
+        ),
         "fps": args.fps,
         "playbackOrder": playback,
         "maxMeasuredRootDeviation": {

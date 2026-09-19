@@ -4,6 +4,8 @@ Use these internally. Do not expose them as instructions the user must paste.
 
 These prompts apply to the regenerative branch. In faithful extraction, do not use image generation to create production RGB or alpha. A generated background-removal mask is diagnostic only and cannot subtract protected source pixels, determine bounds/pivot, or replace native source color.
 
+Do not invoke the key-pose prompt once per timeline frame for a subtle idle. Approve a canonical master and only the minimum state variants or motion extrema that deterministic deformation cannot produce. Read [regenerative animation](regenerative-animation.md) before generating timeline assets.
+
 ## Canonical master
 
 ```text
@@ -78,3 +80,14 @@ Correction: {single observed defect}. Change only what is necessary to fix it. P
 ```
 
 Do not accumulate speculative negative instructions across retries.
+
+## Discrete semantic state
+
+```text
+Use case: precise-object-edit
+Asset type: one approved semantic layer for a 2D game animation
+
+Image 1 is the immutable canonical master. Create only the {open-eyes|closed-eyes|mouth-state|hand-state} variant inside region {region}. Preserve every pixel outside that region exactly.
+
+Keep the same canvas, pivot, scale, pose, palette, line weight, and transparency. Output the complete transparent frame for comparison plus the isolated transparent state layer. Do not redraw the head silhouette, hair, neck, collar, costume, or equipment.
+```

@@ -8,11 +8,15 @@ The frame contract is the machine-readable authority for consistency after sourc
 - `authority`: manifest path, source kind, canonical/native paths, approval, and rejected-output provenance
 - `canvas`: final width and height
 - `pivot`: numerical root in top-left coordinates
+- `pivotMeasurement`: lowest-contact or two-foot anatomical measurement with explicit foot regions; use two-foot measurement for uneven stances
 - `groundY`: boot-contact ground line
 - `visibleBounds` and `visibleSize`: approved character envelope
 - `lockedRegions`: regions that must not be redrawn or drift
 - `requiredSemanticRegions`: named regions such as neck/collar with minimum alpha/outline coverage
 - `allowedMovingRegions`: regions allowed to change for the pose
+- `negativeSpaceRegions`: regions or masks that must stay transparent
+- `statefulRegions`: discrete features with approved templates, such as open and closed eyes; set `maxTranslationPixels` to the small deterministic motion allowance used for matching
+- `temporalLimits`: maximum duplicate ratio, consecutive holds, adjacent-motion spike ratio, and loop-seam ratio
 - `tolerances`: numerical limits for pivot, scale, palette, edge density, and margins
 
 Faithful extraction additionally requires a per-frame authority directory and exact limits for missing protected pixels, missing dark-outline pixels, new internal holes, protected RGB error, component-count changes, and per-frame parameter drift.

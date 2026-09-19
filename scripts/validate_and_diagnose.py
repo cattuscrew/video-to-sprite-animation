@@ -25,6 +25,23 @@ def contact_pivot(alpha: np.ndarray, threshold: int = 18) -> tuple[float, int]:
     return float(contact_x.min() + contact_x.max()) / 2.0, bottom
 
 
+def measured_pivot(alpha: np.ndarray, contract: dict[str, object], threshold: int = 18) -> tuple[float, int]:
+    measurement = contract.get("pivotMeasurement", {})
+    if not isinstance(measurement, dict) or measurement.get("method") != "two-foot-anatomical":
+        return contact_pivot(alpha, threshold)
+    contacts: list[tuple[float, int]] = []
+    for key in ("leftFootRegion", "rightFootRegion"):
+        x, y, width, height = [int(value) for value in measurement[key]]
+        patch = alpha[y : y + height, x : x + width]
+        ys, xs = np.nonzero(patch > threshold)
+        if len(xs) == 0:
+            raise ValueError(f"{key} contains no visible pixels")
+        bottom = int(ys.max())
+        contact = xs[ys >= bottom - 5] + x
+        contacts.append((float(contact.min() + contact.max()) / 2.0, y + bottom))
+    return (contacts[0][0] + contacts[1][0]) / 2.0, max(value[1] for value in contacts)
+
+
 def visible_rgb(image: Image.Image) -> tuple[np.ndarray, np.ndarray]:
     rgba = np.asarray(image.convert("RGBA"))
     visible = rgba[:, :, 3] > 18
@@ -124,7 +141,7 @@ def main() -> int:
             errors.append(f"canvas size {image.size} expected={expected_canvas}")
         try:
             bbox = visible_bbox(alpha)
-            actual_pivot = contact_pivot(alpha)
+            actual_pivot = measured_pivot(alpha, contract)
         except ValueError as error:
             errors.append(str(error))
             bbox = (0, 0, 0, 0)
@@ -181,9 +198,17 @@ def main() -> int:
                     errors.append(f"semantic region {name} is outside the canvas")
                     continue
                 protected = master_alpha_region > 18
-                missing = int(np.count_nonzero(protected & (current_alpha <= 18)))
-                if missing:
-                    errors.append(f"semantic region {name} missing protected pixels={missing}")
+                if contract.get("processingMode") == "faithful-extraction":
+                    missing = int(np.count_nonzero(protected & (current_alpha <= 18)))
+                    if missing:
+                        errors.append(f"semantic region {name} missing protected pixels={missing}")
+                else:
+                    reference_coverage = int(np.count_nonzero(protected))
+                    current_coverage = int(np.count_nonzero(current_alpha > 18))
+                    ratio = current_coverage / max(1, reference_coverage)
+                    minimum = float(tolerance.get("minimumSemanticCoverageRatio", 0.60))
+                    if ratio < minimum:
+                        errors.append(f"semantic region {name} coverage ratio={ratio:.3f}")
 
         record = {
             "frame": path.name,

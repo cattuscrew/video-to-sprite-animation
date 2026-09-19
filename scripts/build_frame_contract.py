@@ -19,12 +19,24 @@ def parse_pair(value: str) -> tuple[int, int]:
     return parts[0], parts[1]
 
 
+def parse_rect(value: str) -> list[int]:
+    parts = [int(part.strip()) for part in value.split(",")]
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("region must be x,y,width,height")
+    return parts
+
+
 def parse_region(value: str) -> dict[str, object]:
     name, raw = value.split("=", 1)
     parts = [int(part.strip()) for part in raw.split(",")]
     if len(parts) != 4:
         raise argparse.ArgumentTypeError("region must be name=x,y,width,height")
     return {"name": name, "rect": parts}
+
+
+def parse_state_template(value: str) -> tuple[str, str]:
+    name, path = value.split("=", 1)
+    return name, str(Path(path).resolve())
 
 
 def validate_authority(authority: dict[str, object]) -> None:
@@ -53,6 +65,21 @@ def contact_pivot(alpha: np.ndarray, threshold: int = 18) -> tuple[float, int]:
     return float(contact_x.min() + contact_x.max()) / 2.0, bottom
 
 
+def two_foot_pivot(
+    alpha: np.ndarray, left_rect: list[int], right_rect: list[int], threshold: int = 18
+) -> tuple[float, int]:
+    contacts: list[tuple[float, int]] = []
+    for x, y, width, height in (left_rect, right_rect):
+        patch = alpha[y : y + height, x : x + width]
+        ys, xs = np.nonzero(patch > threshold)
+        if len(xs) == 0:
+            raise ValueError("foot region contains no visible pixels")
+        bottom = int(ys.max())
+        contact = xs[ys >= bottom - 5] + x
+        contacts.append((float(contact.min() + contact.max()) / 2.0, y + bottom))
+    return (contacts[0][0] + contacts[1][0]) / 2.0, max(value[1] for value in contacts)
+
+
 def edge_density(rgb: np.ndarray, alpha: np.ndarray) -> float:
     gray = rgb[:, :, 0] * 0.299 + rgb[:, :, 1] * 0.587 + rgb[:, :, 2] * 0.114
     dx = np.diff(gray, axis=1, append=gray[:, -1:])
@@ -78,6 +105,23 @@ def main() -> None:
     parser.add_argument("--locked-region", action="append", default=[], type=parse_region)
     parser.add_argument("--required-semantic-region", action="append", default=[], type=parse_region)
     parser.add_argument("--allowed-moving", action="append", default=[])
+    parser.add_argument("--negative-space-region", action="append", default=[], type=parse_region)
+    parser.add_argument("--stateful-region", action="append", default=[], type=parse_region)
+    parser.add_argument("--state-template", action="append", default=[], type=parse_state_template)
+    parser.add_argument(
+        "--state-shift-pixels",
+        type=int,
+        default=2,
+        help="bounded local translation allowed when matching state templates",
+    )
+    parser.add_argument("--approved-transition", action="append", default=[])
+    parser.add_argument("--approved-hold", action="append", default=[])
+    parser.add_argument("--left-foot-region", type=parse_rect)
+    parser.add_argument("--right-foot-region", type=parse_rect)
+    parser.add_argument("--max-duplicate-ratio", type=float, default=0.10)
+    parser.add_argument("--max-consecutive-holds", type=int, default=1)
+    parser.add_argument("--max-motion-spike-ratio", type=float, default=3.0)
+    parser.add_argument("--max-seam-ratio", type=float, default=3.0)
     args = parser.parse_args()
 
     authority = json.loads(args.authority_manifest.read_text())
@@ -89,12 +133,32 @@ def main() -> None:
     rgba = np.asarray(image)
     alpha = rgba[:, :, 3]
     bbox = visible_bbox(alpha)
-    pivot = contact_pivot(alpha)
+    if bool(args.left_foot_region) != bool(args.right_foot_region):
+        raise SystemExit("--left-foot-region and --right-foot-region must be supplied together")
+    pivot = (
+        two_foot_pivot(alpha, args.left_foot_region, args.right_foot_region)
+        if args.left_foot_region and args.right_foot_region
+        else contact_pivot(alpha)
+    )
     visible = alpha > 18
     rgb = rgba[:, :, :3][visible].astype(np.float32) / 255.0
     quantized = np.clip((rgb * 16).astype(np.int32), 0, 15)
     histogram = np.bincount(quantized[:, 0] * 256 + quantized[:, 1] * 16 + quantized[:, 2], minlength=4096)
     histogram = (histogram / max(1, histogram.sum())).round(6).tolist()
+
+    templates: dict[str, list[str]] = {}
+    for name, path in args.state_template:
+        templates.setdefault(name, []).append(path)
+    stateful_regions = []
+    for region in args.stateful_region:
+        stateful_regions.append(
+            {
+                **region,
+                "templates": templates.get(str(region["name"]), []),
+                "maxMeanAbsolute": 0.08,
+                "maxTranslationPixels": max(0, args.state_shift_pixels),
+            }
+        )
 
     contract = {
         "version": 2,
@@ -114,6 +178,15 @@ def main() -> None:
         "visibleBounds": list(bbox),
         "visibleSize": [bbox[2] - bbox[0], bbox[3] - bbox[1]],
         "measuredContactPivot": [round(pivot[0], 2), pivot[1]],
+        "pivotMeasurement": (
+            {
+                "method": "two-foot-anatomical",
+                "leftFootRegion": args.left_foot_region,
+                "rightFootRegion": args.right_foot_region,
+            }
+            if args.left_foot_region and args.right_foot_region
+            else {"method": "lowest-contact"}
+        ),
         "margins": {
             "left": bbox[0],
             "top": bbox[1],
@@ -128,6 +201,18 @@ def main() -> None:
         "lockedRegions": args.locked_region,
         "requiredSemanticRegions": args.required_semantic_region,
         "allowedMovingRegions": args.allowed_moving,
+        "negativeSpaceRegions": [
+            {**region, "maxVisiblePixels": 0} for region in args.negative_space_region
+        ],
+        "statefulRegions": stateful_regions,
+        "approvedTemporalTransitions": args.approved_transition,
+        "approvedHoldTransitions": args.approved_hold,
+        "temporalLimits": {
+            "maximumDuplicateRatio": args.max_duplicate_ratio,
+            "maximumConsecutiveHolds": args.max_consecutive_holds,
+            "maximumMotionSpikeRatio": args.max_motion_spike_ratio,
+            "maximumLoopSeamRatio": args.max_seam_ratio,
+        },
         "tolerances": {
             "pivotPixels": 1,
             "visibleScaleRatio": args.scale_tolerance,
@@ -140,6 +225,7 @@ def main() -> None:
             "newInternalHoles": 0,
             "protectedRgbMaxError": 0,
             "componentCountDelta": 0,
+            "minimumSemanticCoverageRatio": 0.60,
         },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
