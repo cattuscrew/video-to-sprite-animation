@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
+from delivery_policy import contract_policy_errors, mapping_manifest_errors
+
 
 def visible_bbox(alpha: np.ndarray, threshold: int = 18) -> tuple[int, int, int, int]:
     ys, xs = np.nonzero(alpha > threshold)
@@ -101,22 +103,20 @@ def authority_errors(contract: dict[str, object]) -> list[str]:
         errors.append("authority/proof frame is not user-approved")
     if not isinstance(authority, dict) or authority.get("derivedFromRejectedOutput") is not False:
         errors.append("authority may be derived from rejected output")
-    if not isinstance(authority, dict) or authority.get("backgroundRemovalTool") not in {"rembg", "GPT Image"}:
-        errors.append("authority backgroundRemovalTool must be rembg or GPT Image")
-    if not isinstance(authority, dict) or authority.get("backgroundRemovalToolApproved") is not True:
-        errors.append("background-removal tool is not user-approved")
     if isinstance(authority, dict):
-        expected_mode = "rembg-extraction" if authority.get("backgroundRemovalTool") == "rembg" else "gpt-image-regeneration"
-        if authority.get("processingMode") != expected_mode:
-            errors.append("authority processingMode does not match backgroundRemovalTool")
-        if contract.get("backgroundRemovalTool") != authority.get("backgroundRemovalTool"):
-            errors.append("contract backgroundRemovalTool does not match authority")
-        if contract.get("processingMode") != authority.get("processingMode"):
-            errors.append("contract processingMode does not match authority")
-    if contract.get("processingMode") == "rembg-extraction" and not contract.get(
-        "perFrameAuthorityDirectory"
-    ):
-        errors.append("rembg extraction lacks per-frame authority")
+        errors.extend(contract_policy_errors(contract))
+        construction = authority.get("frameConstruction")
+        manifest_path = (
+            contract.get("sourceFrameManifest")
+            if construction == "one-to-one-source"
+            else contract.get("motionReferenceManifest")
+        )
+        if manifest_path:
+            try:
+                manifest = json.loads(Path(str(manifest_path)).read_text())
+                errors.extend(mapping_manifest_errors(manifest, str(construction)))
+            except (OSError, json.JSONDecodeError) as error:
+                errors.append(f"cannot read mapping manifest: {error}")
     return errors
 
 

@@ -11,6 +11,13 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from delivery_policy import (
+    ONE_TO_ONE,
+    SYNTHESIZED,
+    authority_policy_errors,
+    mapping_manifest_errors,
+)
+
 
 def parse_pair(value: str) -> tuple[int, int]:
     parts = [int(part.strip()) for part in value.lower().replace("x", ",").split(",")]
@@ -49,15 +56,9 @@ def validate_authority(authority: dict[str, object]) -> None:
         raise ValueError("authority may be derived from rejected output")
     if not authority.get("canonicalMaster") and not authority.get("nativeSource"):
         raise ValueError("authority names neither canonicalMaster nor nativeSource")
-    tool = authority.get("backgroundRemovalTool")
-    if tool not in {"rembg", "GPT Image"}:
-        raise ValueError("authority backgroundRemovalTool must be rembg or GPT Image")
-    if authority.get("backgroundRemovalToolApproved") is not True:
-        raise ValueError("background-removal tool is not user-approved")
-    mode = authority.get("processingMode")
-    expected = "rembg-extraction" if tool == "rembg" else "gpt-image-regeneration"
-    if mode != expected:
-        raise ValueError(f"authority processingMode={mode!r} does not match tool={tool!r}")
+    policy_errors = authority_policy_errors(authority)
+    if policy_errors:
+        raise ValueError("; ".join(policy_errors))
 
 
 def visible_bbox(alpha: np.ndarray, threshold: int = 18) -> tuple[int, int, int, int]:
@@ -106,11 +107,16 @@ def main() -> None:
     parser.add_argument("--scale-tolerance", type=float, default=0.03)
     parser.add_argument(
         "--processing-mode",
-        choices=("rembg-extraction", "gpt-image-regeneration"),
+        choices=(
+            "rembg-extraction",
+            "gpt-image-per-frame-edit",
+            "gpt-image-regeneration",
+        ),
         required=True,
     )
     parser.add_argument("--authority-manifest", required=True, type=Path)
     parser.add_argument("--source-frame-manifest", type=Path)
+    parser.add_argument("--motion-reference-manifest", type=Path)
     parser.add_argument("--per-frame-authority-dir", type=Path)
     parser.add_argument("--locked-region", action="append", default=[], type=parse_region)
     parser.add_argument("--required-semantic-region", action="append", default=[], type=parse_region)
@@ -141,10 +147,27 @@ def main() -> None:
             "--processing-mode must match authority processingMode "
             f"({authority['processingMode']})"
         )
-    if args.processing_mode == "rembg-extraction" and not args.per_frame_authority_dir:
-        raise SystemExit("rembg-extraction requires --per-frame-authority-dir")
-    if args.processing_mode == "rembg-extraction" and not args.source_frame_manifest:
-        raise SystemExit("rembg-extraction requires --source-frame-manifest")
+    construction = authority["frameConstruction"]
+    if construction == ONE_TO_ONE:
+        if not args.per_frame_authority_dir:
+            raise SystemExit("one-to-one-source requires --per-frame-authority-dir")
+        if not args.source_frame_manifest:
+            raise SystemExit("one-to-one-source requires --source-frame-manifest")
+        if args.motion_reference_manifest:
+            raise SystemExit("one-to-one-source must not use --motion-reference-manifest")
+        mapping_manifest = json.loads(args.source_frame_manifest.read_text())
+        mapping_errors = mapping_manifest_errors(mapping_manifest, ONE_TO_ONE)
+    elif construction == SYNTHESIZED:
+        if args.source_frame_manifest:
+            raise SystemExit("synthesized must use --motion-reference-manifest")
+        if not args.motion_reference_manifest:
+            raise SystemExit("synthesized requires --motion-reference-manifest")
+        mapping_manifest = json.loads(args.motion_reference_manifest.read_text())
+        mapping_errors = mapping_manifest_errors(mapping_manifest, SYNTHESIZED)
+    else:
+        raise SystemExit(f"unsupported frameConstruction={construction!r}")
+    if mapping_errors:
+        raise SystemExit("invalid mapping manifest: " + "; ".join(mapping_errors))
 
     image = Image.open(args.master).convert("RGBA")
     rgba = np.asarray(image)
@@ -178,9 +201,13 @@ def main() -> None:
         )
 
     contract = {
-        "version": 2,
+        "version": 4,
+        "frameConstruction": authority["frameConstruction"],
         "processingMode": args.processing_mode,
         "backgroundRemovalTool": authority["backgroundRemovalTool"],
+        "pixelAuthority": authority["pixelAuthority"],
+        "poseAuthority": authority["poseAuthority"],
+        "mappingRole": authority["mappingRole"],
         "authorityManifest": str(args.authority_manifest.resolve()),
         "authority": authority,
         "sourceFrameManifest": (
@@ -188,6 +215,12 @@ def main() -> None:
             if args.source_frame_manifest
             else None
         ),
+        "motionReferenceManifest": (
+            str(args.motion_reference_manifest.resolve())
+            if args.motion_reference_manifest
+            else None
+        ),
+        "sourceCorrespondenceRequired": construction == ONE_TO_ONE,
         "perFrameAuthorityDirectory": (
             str(args.per_frame_authority_dir.resolve())
             if args.per_frame_authority_dir

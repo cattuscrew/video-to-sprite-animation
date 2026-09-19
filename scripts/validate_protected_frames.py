@@ -11,6 +11,8 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+from delivery_policy import ONE_TO_ONE, authority_policy_errors
+
 
 ALLOWED_SOURCE_KINDS = {"canonical-original", "native-source-derived"}
 
@@ -40,20 +42,11 @@ def validate_authority(manifest: dict[str, object]) -> list[str]:
         errors.append("authority may be derived from rejected output")
     if not manifest.get("canonicalMaster") and not manifest.get("nativeSource"):
         errors.append("authority names neither canonicalMaster nor nativeSource")
-    tool = manifest.get("backgroundRemovalTool")
-    if tool not in {"rembg", "GPT Image"}:
-        errors.append("authority backgroundRemovalTool must be rembg or GPT Image")
-    if manifest.get("backgroundRemovalToolApproved") is not True:
-        errors.append("background-removal tool is not user-approved")
-    expected_mode = "rembg-extraction" if tool == "rembg" else "gpt-image-regeneration"
-    if manifest.get("processingMode") != expected_mode:
-        errors.append("authority processingMode does not match backgroundRemovalTool")
-    if manifest.get("processingMode") == "rembg-extraction":
-        if not manifest.get("sourceFrameManifest"):
-            errors.append("rembg authority is missing sourceFrameManifest")
-        approval = manifest.get("approvalScope", {})
-        if not isinstance(approval, dict) or approval.get("foregroundRgbPreserved") is not True:
-            errors.append("rembg authority lacks scoped foreground-RGB approval")
+    errors.extend(authority_policy_errors(manifest))
+    if manifest.get("frameConstruction") != ONE_TO_ONE:
+        errors.append("protected-frame validation requires one-to-one-source")
+    if manifest.get("backgroundRemovalTool") != "rembg":
+        errors.append("protected-frame RGB validation is only valid for rembg")
     return errors
 
 

@@ -1,36 +1,24 @@
 # Frame contract
 
-The frame contract is the machine-readable authority for consistency after source selection.
+The frame contract makes source-frame lineage, processing limits, and placement measurable.
 
-## Required fields
+## Required lineage fields
 
-- `processingMode`: `rembg-extraction` or `gpt-image-regeneration`
-- `backgroundRemovalTool`: `rembg` or `GPT Image`, matching the explicit user approval
-- `authority`: manifest path, source kind, canonical/native paths, approval, and rejected-output provenance
-- `sourceFrameManifest`: exact output/native-frame/timestamp mapping and per-frame processing classification
-- `canvas`: final width and height
-- `pivot`: numerical root in top-left coordinates
-- `pivotMeasurement`: lowest-contact or two-foot anatomical measurement with explicit foot regions; use two-foot measurement for uneven stances
-- `groundY`: boot-contact ground line
-- `visibleBounds` and `visibleSize`: approved character envelope
-- `lockedRegions`: regions that must not be redrawn or drift
-- `requiredSemanticRegions`: named regions such as neck/collar with minimum alpha/outline coverage
-- `allowedMovingRegions`: regions allowed to change for the pose
-- `negativeSpaceRegions`: regions or masks that must stay transparent
-- `statefulRegions`: discrete features with approved templates, such as open and closed eyes; set `maxTranslationPixels` to the small deterministic motion allowance used for matching
-- `temporalLimits`: maximum duplicate ratio, consecutive holds, adjacent-motion spike ratio, and loop-seam ratio
-- `tolerances`: numerical limits for pivot, scale, palette, edge density, and margins
+- `frameConstruction`: normally `one-to-one-source`; `synthesized` only with explicit approval
+- `backgroundRemovalTool`: independently selected as `rembg` or `GPT Image`
+- `processingMode`: `rembg-extraction`, `gpt-image-per-frame-edit`, or approved `gpt-image-regeneration`
+- `pixelAuthority` and `poseAuthority`
+- `mappingRole`: `selected-source-frame-authority` for one-to-one processing
+- `sourceFrameManifest`: mandatory for one-to-one processing with either tool
+- `sourceCorrespondenceRequired`: true for one-to-one processing
+- `perFrameAuthorityDirectory`: decoded selected native frames
 
-`rembg-extraction` additionally requires a per-frame authority directory and exact limits for missing protected pixels, missing dark-outline pixels, new internal holes, protected RGB error, component-count changes, and per-frame parameter drift. It also requires `validate_source_correspondence.py` acceptance. `perFrameAuthorityDirectory` may not be null when the result claims native source pixels or native-frame motion.
+The source manifest records output/native-frame order, timestamp, source filename, source SHA-256, classification, and whether RGB or geometry may change. One-to-one records require `sourceFrameRequired: true`, `geometryChanged: false`, and no holds or interpolation.
 
-## How to use it
+Use `motionReferenceManifest` only for explicitly approved synthesized motion. It cannot satisfy source correspondence.
 
-1. Build it from an approved native-source rembg proof frame or the approved GPT Image canonical master. Never build it from rejected or circular derivative output.
-2. Include the contract values in generation prompts as constraints.
-3. Run `validate_and_diagnose.py` after every generated or processed frame.
-4. Preserve the failed frame and diagnostic overlay when a constraint fails.
-5. Write one targeted repair prompt rather than accumulating generic negative prompts.
+## Placement and visual fields
 
-The contract is not a replacement for visual review. It prevents measurable drift while the pivot, white, black, and checkerboard contact sheets expose defects that need human inspection.
+Record canvas, pivot, ground line, two-foot regions when relevant, visible bounds, locked and moving regions, required semantic regions, negative spaces, state templates, temporal limits, and numerical tolerances.
 
-Global metrics cannot authorize missing parts. A rembg frame fails if any protected/topology/semantic check fails even when its pivot, bounds, palette mean, edge density, or mask IoU passes.
+Build the contract from the approved proof and source manifest. Run `validate_and_diagnose.py` for every frame, preserve failed frames and diagnostics, and use targeted repairs. Global metrics cannot authorize a pose that differs from its mapped source frame.

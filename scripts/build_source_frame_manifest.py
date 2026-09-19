@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Write an auditable output-to-native-frame map before frame processing."""
+"""Write a one-to-one selected-video-frame authority map before processing."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -15,6 +16,9 @@ def main() -> None:
     parser.add_argument("--first-native-frame", type=int, required=True)
     parser.add_argument("--source-fps", type=float, required=True)
     parser.add_argument("--output-fps", type=float, required=True)
+    parser.add_argument(
+        "--background-removal-tool", choices=("rembg", "GPT Image"), required=True
+    )
     parser.add_argument("--canvas", default="720,720")
     parser.add_argument("--offset", default="0,0")
     parser.add_argument("--expected-alpha-dir", type=Path)
@@ -22,7 +26,7 @@ def main() -> None:
 
     if args.source_fps != args.output_fps:
         raise SystemExit(
-            "This exact-source manifest requires matching source/output FPS; "
+            "This one-to-one native-FPS manifest requires matching source/output FPS; "
             "use an explicit sampling manifest for decimation."
         )
     files = sorted(args.source_frames.glob("*.png"))
@@ -34,6 +38,11 @@ def main() -> None:
         raise SystemExit("--canvas and --offset require x,y pairs")
 
     mapping = []
+    classification = (
+        "exact-source-extraction"
+        if args.background_removal_tool == "rembg"
+        else "source-frame-gpt-edit"
+    )
     for index, path in enumerate(files, start=1):
         native_frame = args.first_native_frame + index - 1
         mapping.append(
@@ -43,18 +52,23 @@ def main() -> None:
                 "nativeFrame": native_frame,
                 "sourceFile": path.name,
                 "timestampSeconds": (native_frame - 1) / args.source_fps,
-                "classification": "exact-source-extraction",
-                "rgbChanged": False,
+                "classification": classification,
+                "sourceFrameRequired": True,
+                "sourceSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "rgbChanged": args.background_removal_tool == "GPT Image",
                 "geometryChanged": False,
                 "held": False,
                 "interpolated": False,
-                "generated": False,
+                "generated": args.background_removal_tool == "GPT Image",
             }
         )
 
     manifest = {
-        "version": 1,
-        "processingType": "exact-source-extraction",
+        "version": 3,
+        "frameConstruction": "one-to-one-source",
+        "mappingRole": "selected-source-frame-authority",
+        "processingType": "one-to-one-source-processing",
+        "backgroundRemovalTool": args.background_removal_tool,
         "sourceFramesDirectory": str(args.source_frames.resolve()),
         "expectedAlphaDirectory": (
             str(args.expected_alpha_dir.resolve()) if args.expected_alpha_dir else None

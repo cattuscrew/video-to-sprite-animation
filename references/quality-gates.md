@@ -1,10 +1,10 @@
 # Quality gates
 
-## Canonical master
+## Proof and source authority
 
 Approve only when the character is complete, source-faithful, uncropped, consistently styled, genuinely transparent, and surrounded by enough padding for anticipated motion.
 
-For `rembg-extraction`, the clean original and native video frame remain authority; rembg supplies alpha only. A background-removed, normalized, generated, repaired, or previously rejected frame cannot become authority unless independently compared with those sources and explicitly approved. For `gpt-image-regeneration`, the approved canonical GPT Image master is authority.
+For one-to-one processing, each mapped native video frame remains pose authority. RemBG preserves its RGB; GPT Image may edit pixels but must preserve that frame's pose and structure. A canonical master cannot replace the per-frame source.
 
 ## Proof-frame gate
 
@@ -46,9 +46,9 @@ Root alignment passing does not prove temporal consistency. Separately inspect h
 
 Run `scripts/validate_temporal_sequence.py` before acceptance. Inspect its duplicate-frame ratio, longest hold run, adjacent-motion spikes, loop-seam score, locked-region deltas, negative-space probes, and semantic-state matches. A sequence with excessive holds or redraw popping fails even when every still frame looks acceptable.
 
-For native-source rembg claims, also run `scripts/validate_source_correspondence.py`. Smoothness cannot establish that the selected source poses survived processing. Inspect the exact native mapping, protected RGB identity, silhouette/topology, equipment angles, motion amplitude, phase, and named negative spaces.
+Run `scripts/validate_source_correspondence.py` for both tools. For rembg, require native visible-RGB identity. For GPT Image, require source SHA lineage and an accepted full-frame pose-correspondence record for every mapped source/output pair. Inspect silhouette, topology, equipment angles, motion phase, eye state, overlaps, and negative spaces.
 
-For regenerative work, compare each timeline frame with the approved canonical master and the previous/current/next triplet. Treat unexpected local color or silhouette changes as redraw drift. Common examples include filled gaps between hair and shoulder, changing eye construction, shifting equipment details, and independently redrawn outlines.
+For GPT per-frame editing, compare each output first with its exact mapped source and then with previous/current/next outputs. Treat changed pose, filled hair/shoulder gaps, changing eye construction, shifted equipment, or redrawn outlines as drift.
 
 Bounds, pivot, palette mean, mask IoU, and aggregate edge density are supporting metrics only. They cannot accept a frame that fails protected-pixel, topology, outline, semantic-region, or provenance checks.
 
@@ -72,3 +72,5 @@ The validation stage should produce `pivot-contact-sheet.png`, `white-contact-sh
 ## Final report
 
 Record canvas, numerical pivot, frame count, unique/held/reused frames, FPS, playback order, measured pivot range, contract violations, diagnostic paths, repair prompts, validation warnings, retry count, and any intentional motion that exceeds generic thresholds.
+
+Before packaging, run `validate_delivery_package.py`. One-to-one delivery must include accepted source correspondence and `selectedSourceFramesOneBased` exactly matching the manifest. A clean preview cannot override this truth gate.

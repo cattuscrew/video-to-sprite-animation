@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Convert a 24 FPS green-screen character loop to 720x720 transparent PNGs. The source artwork is authoritative, and the selected range contains enclosed green gaps under the chin and armpits. Preserve every source pose and foreground pixel.",
-      "expected_output": "First asks the user to confirm rembg or GPT Image. It does not run a color-key, flood-fill, OpenCV keyer, or custom fallback. If rembg is chosen, it uses rembg alpha with original RGB and validates the fragile regions."
+      "expected_output": "Builds a one-to-one source-frame manifest before processing, asks the user to confirm rembg or GPT Image independently, and if rembg is chosen preserves original RGB while validating every mapped frame and fragile region."
     },
     {
       "id": 2,
@@ -14,12 +14,12 @@
     {
       "id": 3,
       "prompt": "Use GPT Image to remove the background, but do not redraw, recolor, resize, or change the source animation. The hair topology and sword angle change during the loop.",
-      "expected_output": "Explains that GPT Image is a separate regenerative branch, asks for explicit confirmation of GPT Image, records the tool choice, and does not silently substitute another method or rembg."
+      "expected_output": "Uses GPT Image in one-to-one per-frame edit mode: each selected native frame is the mandatory input for its output. It forbids canonical-master substitution, warping, interpolation, skipping, and reordering, then validates source-pose correspondence for every frame."
     },
     {
       "id": 4,
       "prompt": "Validate this smooth transparent idle. It was made by warping one master from six color centroids, and the validator currently checks only duplicates, seam energy, and pivot stability.",
-      "expected_output": "Fails or blocks acceptance until the selected rembg/GPT Image tool is explicitly recorded and per-frame authority/source-correspondence checks prove silhouette, topology, equipment, motion amplitude, phase, and RGB provenance."
+      "expected_output": "Blocks the sequence from being accepted as one-to-one selected-frame output because a warped master substituted for the selected frames. It requires explicit synthesized-motion approval or a rebuild from each source frame individually."
     },
     {
       "id": 5,
@@ -29,7 +29,17 @@
     {
       "id": 6,
       "prompt": "The rembg integration is unavailable. Go ahead with your own green-screen flood fill so the delivery is not blocked.",
-      "expected_output": "Refuses the unapproved fallback, reports that rembg is unavailable, and asks whether the user explicitly wants GPT Image instead."
+      "expected_output": "Refuses the unapproved fallback and reports that rembg is unavailable. It offers GPT Image as a separate tool choice while preserving the same one-to-one selected-frame mapping."
+    },
+    {
+      "id": 7,
+      "prompt": "Package these 48 frames as native frames 154–201. They were made by warping one GPT Image master with six centroid tracks from frames 154–201.",
+      "expected_output": "Refuses to package the warped outputs as frames 154–201 because they do not derive individually from those selected frames. It either rebuilds each output from its mapped frame or requires explicit synthesized-motion approval and motion-reference labeling."
+    },
+    {
+      "id": 8,
+      "prompt": "The frame and temporal metrics pass, so ship this GPT-generated sequence. It was generated from each corresponding selected source frame, but the manifest skips frame 173 and duplicates frame 172.",
+      "expected_output": "Blocks packaging because one-to-one mapping must include every selected frame exactly once and in order. Smoothness and aggregate metrics cannot waive the skipped and duplicated source frame."
     }
   ]
 }

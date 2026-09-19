@@ -1,6 +1,6 @@
 # rembg extraction
 
-Use this branch only after the user explicitly confirms `rembg` as the background-removal tool. The native video frame remains the artwork, geometry, RGB, and topology authority; rembg supplies an alpha mask only.
+Use this branch after the user confirms `rembg`. Frame construction remains independently set to `one-to-one-source`; every output uses its exact mapped native frame.
 
 ## Authority manifest
 
@@ -8,6 +8,10 @@ Record:
 
 - `sourceKind`: `canonical-original` or `native-source-derived`
 - `nativeSource`: the video or decoded native frames
+- `frameConstruction`: `one-to-one-source`
+- `pixelAuthority`: `native-source-rgb`
+- `poseAuthority`: `selected-native-source-frame`
+- `mappingRole`: `selected-source-frame-authority`
 - `userApproved`: true only after the proof-frame gate
 - `backgroundRemovalTool`: `rembg`
 - `backgroundRemovalToolApproved`: true only after explicit user confirmation
@@ -27,7 +31,7 @@ Validation must refuse a missing tool choice, unapproved tool, rejected authorit
 6. Resize RGBA once with premultiplied-alpha resampling.
 7. Apply one shared scale and integer translation. Do not independently recenter frames.
 
-Use the installed rembg integration or connector available in the execution environment. If rembg is unavailable, stop and ask whether the user wants to switch explicitly to GPT Image; never silently substitute another method.
+Use the installed rembg integration or connector available in the execution environment. If rembg is unavailable, stop and ask whether to use GPT Image. Switching tools does not change the selected frame mapping; GPT Image must edit every mapped frame individually.
 
 ## Proof-frame gate
 
