@@ -101,10 +101,22 @@ def authority_errors(contract: dict[str, object]) -> list[str]:
         errors.append("authority/proof frame is not user-approved")
     if not isinstance(authority, dict) or authority.get("derivedFromRejectedOutput") is not False:
         errors.append("authority may be derived from rejected output")
-    if contract.get("processingMode") == "faithful-extraction" and not contract.get(
+    if not isinstance(authority, dict) or authority.get("backgroundRemovalTool") not in {"rembg", "GPT Image"}:
+        errors.append("authority backgroundRemovalTool must be rembg or GPT Image")
+    if not isinstance(authority, dict) or authority.get("backgroundRemovalToolApproved") is not True:
+        errors.append("background-removal tool is not user-approved")
+    if isinstance(authority, dict):
+        expected_mode = "rembg-extraction" if authority.get("backgroundRemovalTool") == "rembg" else "gpt-image-regeneration"
+        if authority.get("processingMode") != expected_mode:
+            errors.append("authority processingMode does not match backgroundRemovalTool")
+        if contract.get("backgroundRemovalTool") != authority.get("backgroundRemovalTool"):
+            errors.append("contract backgroundRemovalTool does not match authority")
+        if contract.get("processingMode") != authority.get("processingMode"):
+            errors.append("contract processingMode does not match authority")
+    if contract.get("processingMode") == "rembg-extraction" and not contract.get(
         "perFrameAuthorityDirectory"
     ):
-        errors.append("faithful extraction lacks per-frame authority")
+        errors.append("rembg extraction lacks per-frame authority")
     return errors
 
 
@@ -198,7 +210,7 @@ def main() -> int:
                     errors.append(f"semantic region {name} is outside the canvas")
                     continue
                 protected = master_alpha_region > 18
-                if contract.get("processingMode") == "faithful-extraction":
+                if contract.get("processingMode") == "rembg-extraction":
                     missing = int(np.count_nonzero(protected & (current_alpha <= 18)))
                     if missing:
                         errors.append(f"semantic region {name} missing protected pixels={missing}")

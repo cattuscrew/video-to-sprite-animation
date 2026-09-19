@@ -2,7 +2,7 @@
 
 Use these internally. Do not expose them as instructions the user must paste.
 
-These prompts apply to the regenerative branch. In faithful extraction, do not use image generation to create production RGB or alpha. A generated background-removal mask is diagnostic only and cannot subtract protected source pixels, determine bounds/pivot, or replace native source color.
+These prompts apply only to the `gpt-image-regeneration` branch. In `rembg-extraction`, do not use image generation to create production RGB or alpha. GPT Image output cannot subtract protected source pixels, determine bounds/pivot, or replace native source color in the rembg branch.
 
 Do not invoke the key-pose prompt once per timeline frame for a subtle idle. Approve a canonical master and only the minimum state variants or motion extrema that deterministic deformation cannot produce. Read [regenerative animation](regenerative-animation.md) before generating timeline assets.
 

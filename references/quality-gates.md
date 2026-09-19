@@ -4,11 +4,13 @@
 
 Approve only when the character is complete, source-faithful, uncropped, consistently styled, genuinely transparent, and surrounded by enough padding for anticipated motion.
 
-For faithful extraction, the clean original and native video frame remain authority. A background-removed, normalized, generated, repaired, or previously rejected frame cannot become authority unless independently compared with those sources and explicitly approved.
+For `rembg-extraction`, the clean original and native video frame remain authority; rembg supplies alpha only. A background-removed, normalized, generated, repaired, or previously rejected frame cannot become authority unless independently compared with those sources and explicitly approved. For `gpt-image-regeneration`, the approved canonical GPT Image master is authority.
 
 ## Proof-frame gate
 
 Before batch extraction or generation, inspect one representative proof frame on checkerboard, white, and black at 100% and 4×. Include fragile semantic crops such as face/neck/collar, hair tips, hands/weapons, equipment boundaries, and feet. Record the approved shared parameters in the authority manifest. Do not infer approval from a contact sheet viewed at reduced scale.
+
+Record the scope of approval. Approval of transparency does not approve changed foreground RGB, changed geometry, regeneration, motion transfer, or a final sequence. A method or branch change requires a new proof.
 
 ## Per-frame rejection criteria
 
@@ -27,7 +29,7 @@ Reject or repair a frame when:
 - any protected source pixel or dark-outline pixel is missing
 - a new internal transparency hole appears
 - a required semantic region such as neck or collar loses coverage
-- protected RGB changes in faithful extraction
+- protected RGB changes in `rembg-extraction`
 - authority provenance is missing, circular, derived from rejected output, or not approved
 
 ## Sequence inspection
@@ -43,6 +45,8 @@ Inspect at normal speed, slow speed, and as previous/current/next triplets. Use:
 Root alignment passing does not prove temporal consistency. Separately inspect head, pelvis, shoulders, hands, equipment centers, silhouette, and line-weight stability.
 
 Run `scripts/validate_temporal_sequence.py` before acceptance. Inspect its duplicate-frame ratio, longest hold run, adjacent-motion spikes, loop-seam score, locked-region deltas, negative-space probes, and semantic-state matches. A sequence with excessive holds or redraw popping fails even when every still frame looks acceptable.
+
+For native-source rembg claims, also run `scripts/validate_source_correspondence.py`. Smoothness cannot establish that the selected source poses survived processing. Inspect the exact native mapping, protected RGB identity, silhouette/topology, equipment angles, motion amplitude, phase, and named negative spaces.
 
 For regenerative work, compare each timeline frame with the approved canonical master and the previous/current/next triplet. Treat unexpected local color or silhouette changes as redraw drift. Common examples include filled gaps between hair and shoulder, changing eye construction, shifting equipment details, and independently redrawn outlines.
 

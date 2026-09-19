@@ -1,6 +1,6 @@
 # Regenerative animation
 
-Use this branch only when faithful source extraction cannot meet the requested quality or when the user explicitly accepts redraw risk. An approved canonical master is the design authority; the native video remains the motion authority.
+Use this branch only when the user explicitly chooses `GPT Image` and accepts redraw risk. An approved canonical master is the design authority; the native video remains the motion authority. If the user chooses `rembg`, stay on the source-preserving branch and do not use these regeneration steps.
 
 ## Strategy order
 

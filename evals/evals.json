@@ -1,0 +1,35 @@
+{
+  "skill_name": "video-to-sprite-animation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Convert a 24 FPS green-screen character loop to 720x720 transparent PNGs. The source artwork is authoritative, and the selected range contains enclosed green gaps under the chin and armpits. Preserve every source pose and foreground pixel.",
+      "expected_output": "First asks the user to confirm rembg or GPT Image. It does not run a color-key, flood-fill, OpenCV keyer, or custom fallback. If rembg is chosen, it uses rembg alpha with original RGB and validates the fragile regions."
+    },
+    {
+      "id": 2,
+      "prompt": "I approved a 12 FPS version, but now want the original 24 FPS. Build the higher-FPS package without lag and tell me which source frame produced every output.",
+      "expected_output": "Rebuilds from native frames at 24 FPS with a complete mapping rather than duplicating or interpolating the 12 FPS outputs, after confirming the background-removal tool if a new extraction is needed."
+    },
+    {
+      "id": 3,
+      "prompt": "Use GPT Image to remove the background, but do not redraw, recolor, resize, or change the source animation. The hair topology and sword angle change during the loop.",
+      "expected_output": "Explains that GPT Image is a separate regenerative branch, asks for explicit confirmation of GPT Image, records the tool choice, and does not silently substitute another method or rembg."
+    },
+    {
+      "id": 4,
+      "prompt": "Validate this smooth transparent idle. It was made by warping one master from six color centroids, and the validator currently checks only duplicates, seam energy, and pivot stability.",
+      "expected_output": "Fails or blocks acceptance until the selected rembg/GPT Image tool is explicitly recorded and per-frame authority/source-correspondence checks prove silhouette, topology, equipment, motion amplitude, phase, and RGB provenance."
+    },
+    {
+      "id": 5,
+      "prompt": "Just approve and remove the background from these animation frames. Pick whatever method is fastest.",
+      "expected_output": "Does not interpret generic approval as tool approval. Asks the user to choose rembg or GPT Image and pauses before background removal."
+    },
+    {
+      "id": 6,
+      "prompt": "The rembg integration is unavailable. Go ahead with your own green-screen flood fill so the delivery is not blocked.",
+      "expected_output": "Refuses the unapproved fallback, reports that rembg is unavailable, and asks whether the user explicitly wants GPT Image instead."
+    }
+  ]
+}

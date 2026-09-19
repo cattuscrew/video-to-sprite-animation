@@ -49,6 +49,15 @@ def validate_authority(authority: dict[str, object]) -> None:
         raise ValueError("authority may be derived from rejected output")
     if not authority.get("canonicalMaster") and not authority.get("nativeSource"):
         raise ValueError("authority names neither canonicalMaster nor nativeSource")
+    tool = authority.get("backgroundRemovalTool")
+    if tool not in {"rembg", "GPT Image"}:
+        raise ValueError("authority backgroundRemovalTool must be rembg or GPT Image")
+    if authority.get("backgroundRemovalToolApproved") is not True:
+        raise ValueError("background-removal tool is not user-approved")
+    mode = authority.get("processingMode")
+    expected = "rembg-extraction" if tool == "rembg" else "gpt-image-regeneration"
+    if mode != expected:
+        raise ValueError(f"authority processingMode={mode!r} does not match tool={tool!r}")
 
 
 def visible_bbox(alpha: np.ndarray, threshold: int = 18) -> tuple[int, int, int, int]:
@@ -97,10 +106,11 @@ def main() -> None:
     parser.add_argument("--scale-tolerance", type=float, default=0.03)
     parser.add_argument(
         "--processing-mode",
-        choices=("faithful-extraction", "regenerative"),
+        choices=("rembg-extraction", "gpt-image-regeneration"),
         required=True,
     )
     parser.add_argument("--authority-manifest", required=True, type=Path)
+    parser.add_argument("--source-frame-manifest", type=Path)
     parser.add_argument("--per-frame-authority-dir", type=Path)
     parser.add_argument("--locked-region", action="append", default=[], type=parse_region)
     parser.add_argument("--required-semantic-region", action="append", default=[], type=parse_region)
@@ -126,8 +136,15 @@ def main() -> None:
 
     authority = json.loads(args.authority_manifest.read_text())
     validate_authority(authority)
-    if args.processing_mode == "faithful-extraction" and not args.per_frame_authority_dir:
-        raise SystemExit("faithful-extraction requires --per-frame-authority-dir")
+    if args.processing_mode != authority["processingMode"]:
+        raise SystemExit(
+            "--processing-mode must match authority processingMode "
+            f"({authority['processingMode']})"
+        )
+    if args.processing_mode == "rembg-extraction" and not args.per_frame_authority_dir:
+        raise SystemExit("rembg-extraction requires --per-frame-authority-dir")
+    if args.processing_mode == "rembg-extraction" and not args.source_frame_manifest:
+        raise SystemExit("rembg-extraction requires --source-frame-manifest")
 
     image = Image.open(args.master).convert("RGBA")
     rgba = np.asarray(image)
@@ -163,8 +180,14 @@ def main() -> None:
     contract = {
         "version": 2,
         "processingMode": args.processing_mode,
+        "backgroundRemovalTool": authority["backgroundRemovalTool"],
         "authorityManifest": str(args.authority_manifest.resolve()),
         "authority": authority,
+        "sourceFrameManifest": (
+            str(args.source_frame_manifest.resolve())
+            if args.source_frame_manifest
+            else None
+        ),
         "perFrameAuthorityDirectory": (
             str(args.per_frame_authority_dir.resolve())
             if args.per_frame_authority_dir
