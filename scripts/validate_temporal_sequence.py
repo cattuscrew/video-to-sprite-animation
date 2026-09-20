@@ -77,6 +77,94 @@ def silhouette_metrics(image: np.ndarray) -> dict[str, object]:
     }
 
 
+def silhouette_change(first: dict[str, object], second: dict[str, object]) -> float:
+    union = np.logical_or(first["mask"], second["mask"])
+    changed = np.logical_xor(first["mask"], second["mask"])
+    return float(changed.sum() / max(1, union.sum()))
+
+
+def pair_geometry_failure(
+    first: dict[str, object],
+    second: dict[str, object],
+    frames: tuple[int, int],
+    limits: dict[str, float],
+    approved: set[str] | None = None,
+    median_silhouette: float = 0.0,
+) -> dict[str, object] | None:
+    """Gate one transition. `frames` carries real frame numbers, so a partial
+    run never treats two frames either side of a gap as neighbours."""
+    transition = f"{frames[0]}->{frames[1]}"
+    if approved and transition in approved:
+        return None
+    change = silhouette_change(first, second)
+    area_step = abs(int(second["area"]) - int(first["area"])) / max(1, int(first["area"]))
+    bbox_step = [
+        abs(int(second["size"][axis]) - int(first["size"][axis])) for axis in (0, 1)
+    ]
+    centroid_step = float(
+        np.linalg.norm(np.asarray(second["centroid"]) - np.asarray(first["centroid"]))
+    )
+    reasons = []
+    if median_silhouette and change > median_silhouette * limits["maximumSilhouetteSpikeRatio"]:
+        reasons.append("silhouette-change spike")
+    if area_step > limits["maximumVisibleAreaStepRatio"]:
+        reasons.append("visible-area step")
+    if max(bbox_step) > limits["maximumBoundingBoxSizeStepPixels"]:
+        reasons.append("bounding-box size step")
+    if centroid_step > limits["maximumCentroidStepPixels"]:
+        reasons.append("centroid step")
+    if not reasons:
+        return None
+    return {
+        "transition": transition,
+        "reasons": reasons,
+        "silhouetteChange": change,
+        "visibleAreaStepRatio": area_step,
+        "boundingBoxSizeStepPixels": bbox_step,
+        "centroidStepPixels": centroid_step,
+    }
+
+
+def triplet_acceleration_failure(
+    first: dict[str, object],
+    second: dict[str, object],
+    third: dict[str, object],
+    frames: tuple[int, int, int],
+    limits: dict[str, float],
+    approved: set[str] | None = None,
+) -> dict[str, object] | None:
+    """Gate the second difference across one triplet of consecutive frames."""
+    if approved and {
+        f"{frames[0]}->{frames[1]}",
+        f"{frames[1]}->{frames[2]}",
+    } & approved:
+        return None
+    sizes = [first["size"], second["size"], third["size"]]
+    bbox_acceleration = [
+        abs(int(sizes[2][axis]) - 2 * int(sizes[1][axis]) + int(sizes[0][axis]))
+        for axis in (0, 1)
+    ]
+    centroids = [
+        np.asarray(item["centroid"], dtype=np.float32) for item in (first, second, third)
+    ]
+    centroid_acceleration = float(
+        np.linalg.norm(centroids[2] - 2 * centroids[1] + centroids[0])
+    )
+    reasons = []
+    if max(bbox_acceleration) > limits["maximumBoundingBoxSizeAccelerationPixels"]:
+        reasons.append("bounding-box size acceleration")
+    if centroid_acceleration > limits["maximumCentroidAccelerationPixels"]:
+        reasons.append("centroid acceleration")
+    if not reasons:
+        return None
+    return {
+        "frame": frames[1],
+        "reasons": reasons,
+        "boundingBoxSizeAccelerationPixels": bbox_acceleration,
+        "centroidAccelerationPixels": centroid_acceleration,
+    }
+
+
 def alpha_onion(first: np.ndarray, second: np.ndarray) -> Image.Image:
     a = first[:, :, 3] > 18
     b = second[:, :, 3] > 18
@@ -215,9 +303,7 @@ def main() -> int:
     centroid_steps = []
     for index in range(len(images) - 1):
         first, second = silhouettes[index], silhouettes[index + 1]
-        union = np.logical_or(first["mask"], second["mask"])
-        changed = np.logical_xor(first["mask"], second["mask"])
-        silhouette_deltas.append(float(changed.sum() / max(1, union.sum())))
+        silhouette_deltas.append(silhouette_change(first, second))
         area_steps.append(abs(int(second["area"]) - int(first["area"])) / max(1, int(first["area"])))
         bbox_steps.append([
             abs(int(second["size"][0]) - int(first["size"][0])),
@@ -226,53 +312,41 @@ def main() -> int:
         centroid_steps.append(float(np.linalg.norm(np.asarray(second["centroid"]) - np.asarray(first["centroid"]))))
     nonzero_silhouette = [value for value in silhouette_deltas if value > 1e-8]
     median_silhouette = float(np.median(nonzero_silhouette)) if nonzero_silhouette else 0.0
+    limits = {
+        "maximumSilhouetteSpikeRatio": max_silhouette_spike_ratio,
+        "maximumVisibleAreaStepRatio": max_area_step,
+        "maximumBoundingBoxSizeStepPixels": max_bbox_step,
+        "maximumCentroidStepPixels": max_centroid_step,
+        "maximumBoundingBoxSizeAccelerationPixels": max_bbox_accel,
+        "maximumCentroidAccelerationPixels": max_centroid_accel,
+    }
     geometry_failures = []
     flagged_frames: set[int] = set()
     for index in range(len(images) - 1):
-        transition = f"{index + 1}->{index + 2}"
-        if transition in approved:
-            continue
-        reasons = []
-        if median_silhouette and silhouette_deltas[index] > median_silhouette * max_silhouette_spike_ratio:
-            reasons.append("silhouette-change spike")
-        if area_steps[index] > max_area_step:
-            reasons.append("visible-area step")
-        if max(bbox_steps[index]) > max_bbox_step:
-            reasons.append("bounding-box size step")
-        if centroid_steps[index] > max_centroid_step:
-            reasons.append("centroid step")
-        if reasons:
-            geometry_failures.append({
-                "transition": transition,
-                "reasons": reasons,
-                "silhouetteChange": silhouette_deltas[index],
-                "visibleAreaStepRatio": area_steps[index],
-                "boundingBoxSizeStepPixels": bbox_steps[index],
-                "centroidStepPixels": centroid_steps[index],
-            })
+        failure = pair_geometry_failure(
+            silhouettes[index],
+            silhouettes[index + 1],
+            (index + 1, index + 2),
+            limits,
+            approved,
+            median_silhouette,
+        )
+        if failure:
+            geometry_failures.append(failure)
             flagged_frames.update((index + 1, index + 2))
 
     acceleration_failures = []
     for index in range(1, len(images) - 1):
-        surrounding = {f"{index}->{index + 1}", f"{index + 1}->{index + 2}"}
-        if surrounding & approved:
-            continue
-        sizes = [silhouettes[item]["size"] for item in (index - 1, index, index + 1)]
-        bbox_acceleration = [abs(int(sizes[2][axis]) - 2 * int(sizes[1][axis]) + int(sizes[0][axis])) for axis in (0, 1)]
-        centroids = [np.asarray(silhouettes[item]["centroid"], dtype=np.float32) for item in (index - 1, index, index + 1)]
-        centroid_acceleration = float(np.linalg.norm(centroids[2] - 2 * centroids[1] + centroids[0]))
-        reasons = []
-        if max(bbox_acceleration) > max_bbox_accel:
-            reasons.append("bounding-box size acceleration")
-        if centroid_acceleration > max_centroid_accel:
-            reasons.append("centroid acceleration")
-        if reasons:
-            acceleration_failures.append({
-                "frame": index + 1,
-                "reasons": reasons,
-                "boundingBoxSizeAccelerationPixels": bbox_acceleration,
-                "centroidAccelerationPixels": centroid_acceleration,
-            })
+        failure = triplet_acceleration_failure(
+            silhouettes[index - 1],
+            silhouettes[index],
+            silhouettes[index + 1],
+            (index, index + 1, index + 2),
+            limits,
+            approved,
+        )
+        if failure:
+            acceleration_failures.append(failure)
             flagged_frames.add(index + 1)
     seam_ratio = energies[-1] / median_motion if median_motion else (0.0 if energies[-1] == 0 else float("inf"))
 
