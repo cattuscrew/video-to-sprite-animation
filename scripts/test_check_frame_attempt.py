@@ -112,6 +112,41 @@ class AttemptCheckTests(unittest.TestCase):
         self.place(3, sprite(16))
         self.assertEqual(self.check(3)["status"], "accepted", self.check(3)["errors"])
 
+    def test_a_recoloured_frame_is_caught(self) -> None:
+        """A clean cut-out in the wrong colour. Silhouette, drift, identity and
+        every temporal gate pass; only the comparison with the source's own
+        interior colour sees it."""
+        tinted = sprite(16)
+        opaque = tinted[:, :, 3] > 250
+        tinted[:, :, 2][opaque] = np.clip(
+            tinted[:, :, 2][opaque].astype(int) + 40, 0, 255
+        ).astype(np.uint8)
+        self.place(3, tinted)
+        report = self.check(3)
+        self.assertEqual(report["status"], "repair-needed")
+        self.assertTrue(
+            any("recoloured" in e for e in report["errors"]), report["errors"]
+        )
+
+    def test_redrawn_linework_is_caught(self) -> None:
+        """The outline thickened. Colour bias stays near zero because the fill
+        is untouched, so the dark-pixel fraction is what notices."""
+        inked = sprite(16)
+        inked[20:32, 16:56] = (30, 40, 60, 255)
+        self.place(3, inked)
+        report = self.check(3)
+        self.assertEqual(report["status"], "repair-needed")
+        self.assertTrue(
+            any("linework" in e for e in report["errors"]), report["errors"]
+        )
+
+    def test_a_faithful_frame_reports_its_appearance_measurements(self) -> None:
+        self.place(3, sprite(16))
+        report = self.check(3)
+        self.assertLess(report["interiorRgbMeanAbsoluteError"], 1.0)
+        self.assertEqual(len(report["interiorChannelBias"]), 3)
+        self.assertEqual(len(report["darkOutlineFraction"]), 2)
+
     def test_the_wrong_frame_is_caught_even_though_it_is_a_valid_sprite(self) -> None:
         """Frame 3's job filled with frame 4's image. Every per-frame limit
         passes -- it is a clean sprite two pixels along -- so only the

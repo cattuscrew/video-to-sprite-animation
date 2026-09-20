@@ -14,6 +14,11 @@ A neighbour-relative check depends on arrival order and cannot be re-run
 cheaply; a fixed target taken from the approved proof frame is order-free, so
 a frame can be accepted the moment it lands and never revisited.
 
+Appearance. The tool is asked to remove a background, not to repaint. Interior
+colour and the artwork's own outlines are compared with the frame's native
+source, because with no approved parent to restore RGB from, nothing else in
+the pipeline would notice a recoloured or re-inked frame.
+
 Provenance. The attempt's image must be the one the worker's own session
 produced, bound by item id, and the inputs must still hash to what the job
 froze.
@@ -38,6 +43,7 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
+from register_to_authority import erode
 from source_foreground import foreground_mask
 from validate_temporal_sequence import (
     pair_geometry_failure,
@@ -47,6 +53,19 @@ from validate_temporal_sequence import (
 
 DEFAULT_DRIFT_RADIUS = 0.35  # px; observed post-registration max was 0.074
 
+# Measured across the 48 delivered frames against their own native sources.
+# Mean absolute error runs 9-11.5 levels, almost all of it local disagreement
+# where an internal outline lands half a pixel differently after resampling.
+# Signed per-channel bias over the same pixels never exceeded 3.8, so a tint
+# shift shows up in the bias long before it shows up in the mean -- which is
+# why both are measured and the bias limit is the tight one.
+MAX_INTERIOR_RGB_ERROR = 20.0
+MAX_CHANNEL_BIAS = 8.0
+# The artwork's black keyline. Output ran 10.5% of the interior against the
+# source's 8.2%, never differing by more than 3.3 points.
+MAX_OUTLINE_FRACTION_DELTA = 0.06
+DARK_LUMA = 60.0
+
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -54,6 +73,60 @@ def sha256(path: Path) -> str:
 
 def rgba(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8)
+
+
+def luma(rgb: np.ndarray) -> np.ndarray:
+    values = rgb[:, :, :3].astype(np.float64)
+    return 0.299 * values[:, :, 0] + 0.587 * values[:, :, 1] + 0.114 * values[:, :, 2]
+
+
+def appearance_failures(
+    output: np.ndarray, authority: np.ndarray, check: dict[str, object]
+) -> list[str]:
+    """Compare interior colour and outline with the native source frame.
+
+    Measured on the eroded opaque interior only: the soft edge is where the
+    tool is allowed to work, and including it would drown a real recolour in
+    the noise of anti-aliasing.
+    """
+    interior = erode(output[:, :, 3] > 250, 2)
+    count = int(interior.sum())
+    check["interiorPixelsCompared"] = count
+    if count < 500:
+        return ["too little opaque interior to compare appearance against the source"]
+
+    difference = output[:, :, :3][interior].astype(np.float64) - authority[:, :, :3][
+        interior
+    ].astype(np.float64)
+    error = float(np.abs(difference).mean())
+    bias = difference.mean(axis=0)
+    check["interiorRgbMeanAbsoluteError"] = round(error, 3)
+    check["interiorChannelBias"] = [round(float(value), 3) for value in bias]
+
+    output_dark = float((luma(output)[interior] < DARK_LUMA).mean())
+    source_dark = float((luma(authority)[interior] < DARK_LUMA).mean())
+    check["darkOutlineFraction"] = [round(output_dark, 5), round(source_dark, 5)]
+
+    failures: list[str] = []
+    if error > MAX_INTERIOR_RGB_ERROR:
+        failures.append(
+            f"interior colour differs from the source by {error:.1f} levels, "
+            f"over {MAX_INTERIOR_RGB_ERROR:.0f}"
+        )
+    worst = float(np.abs(bias).max())
+    if worst > MAX_CHANNEL_BIAS:
+        failures.append(
+            f"interior colour is shifted {worst:.1f} levels on one channel "
+            f"(over {MAX_CHANNEL_BIAS:.0f}); the frame has been recoloured, not "
+            "just cut out"
+        )
+    delta = abs(output_dark - source_dark)
+    if delta > MAX_OUTLINE_FRACTION_DELTA:
+        failures.append(
+            f"dark outline covers {output_dark:.1%} of the interior against the "
+            f"source's {source_dark:.1%}; the linework has been redrawn"
+        )
+    return failures
 
 
 def centroid(mask: np.ndarray) -> np.ndarray:
@@ -203,6 +276,8 @@ def main() -> int:
     scores, identity_errors = check_identity(output, args.run, args.frame)
     check["authorityDisagreement"] = scores
     errors.extend(identity_errors)
+
+    errors.extend(appearance_failures(output, authority, check))
 
     # Order-independent drift: measured against this frame's own authority and
     # compared with a fixed approved target, never with whatever landed nearby.

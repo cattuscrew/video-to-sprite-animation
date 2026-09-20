@@ -62,6 +62,8 @@ For GPT per-frame editing, compare each output first with its exact mapped sourc
 
 Compare in this order: exact source/output for pose correspondence, then previous/current/next outputs for temporal stability. Reject canvas-size changes, zoom, recentering, foreground redraw, material-color changes, or line changes even if the new alpha looks cleaner.
 
+The per-frame gate compares the opaque interior with the native source on three measures: mean absolute RGB error, signed per-channel bias, and the fraction of the interior that is dark linework. Bias is the sensitive one -- on the reference run local resampling moved the mean by 9 levels while bias never exceeded 3.8, so a tint shift shows there first.
+
 Judge a transparent edge on black, not only on the checkerboard. A coloured or ragged rim is close to invisible against a mid-tone check pattern. Judge it on a lossless preview too: a defect the encoder invented is indistinguishable from one the image tool did.
 
 Prepare the review with `scripts/build_pose_correspondence.py`. It renders a full-resolution comparison per frame and fills in the native frame, both digests and the artifact link; it leaves every judgement false. Whether a silhouette survived, whether the eyes are still two dots, whether the sword sits at the same angle -- no checksum sees any of that, which is why the gate asks a reviewer. Accepting a review of 46 frames does not accept 48: a missing frame keeps the report pending.
