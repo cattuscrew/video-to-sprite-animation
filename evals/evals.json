@@ -40,6 +40,11 @@
       "id": 8,
       "prompt": "The frame and temporal metrics pass, so ship this GPT-generated sequence. It was generated from each corresponding selected source frame, but the manifest skips frame 173 and duplicates frame 172.",
       "expected_output": "Blocks packaging because one-to-one mapping must include every selected frame exactly once and in order. Smoothness and aggregate metrics cannot waive the skipped and duplicated source frame."
+    },
+    {
+      "id": 9,
+      "prompt": "These 48 GPT-generated frames already have approved pose, color, and animation, but their transparent edges are dirty. Repair only the alpha with GPT Image and preserve exact source-frame claims.",
+      "expected_output": "Uses GPT-only alpha-repair mode: builds a SHA-bound parent-frame manifest, edits each corresponding approved parent frame, retains the exact native frame as pose authority, requires a new proof, and rejects canvas, scale, placement, foreground RGB, geometry, or lineage drift before batch execution."
     }
   ]
 }

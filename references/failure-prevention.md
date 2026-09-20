@@ -14,6 +14,8 @@ Reject one-to-one delivery when any selected frame is skipped, duplicated, reord
 
 Process every selected native frame individually with built-in GPT Image and review every source/output pair.
 
+For alpha-only repair of an already approved sequence, preserve a two-link chain: exact native source -> approved parent output -> repaired output. Bind every parent filename and SHA-256 in `parent-frame-manifest.json`. The parent is the edit target for foreground fidelity; the native source remains pose and motion authority. Never use one parent for another frame.
+
 ## Fix the background tool and credential boundary
 
 Use only the built-in GPT Image generation/editing tool. Do not offer rembg, chroma/color keying, flood-fill, OpenCV keying, a custom extractor, or an external image API. Never request or configure an API key. If the built-in tool is unavailable, stop and report the blocker without asking for credentials or silently changing methods.
@@ -27,6 +29,8 @@ Approval is scoped. Record source-range approval, the fixed built-in GPT Image p
 Before source processing, ask exactly one unresolved choice and wait. Do not combine FPS, canvas, loop, tool, proof, color reference, and batch authorization into one checklist or multi-question prompt. An answer approves only the named decision. Read-only skill loading and resolving the explicitly supplied input path are allowed before the first answer; source inspection, extraction, generation, and mutation are not.
 
 For GPT Image, transparency proof, canonical color reference, color-consistency strategy, and batch execution are four separate gates. A generic “approve” applies only to the single question currently shown.
+
+An alpha-repair strategy change requires a new proof even when the parent sequence was previously approved. Show source/parent/output at full resolution and reject any zoom, redraw, placement change, or canvas change before asking for batch approval.
 
 ## Prevent independent-frame color drift
 

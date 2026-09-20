@@ -6,7 +6,7 @@ The frame contract makes source-frame lineage, processing limits, and placement 
 
 - `frameConstruction`: normally `one-to-one-source`; `synthesized` only with explicit approval
 - `backgroundRemovalTool`: fixed to `GPT Image`
-- `processingMode`: `gpt-image-per-frame-edit`, or approved `gpt-image-regeneration`
+- `processingMode`: `gpt-image-per-frame-edit`, `gpt-image-alpha-repair`, or approved `gpt-image-regeneration`
 - `imageExecutionInterface`: fixed to `built-in-image-tool`; external APIs are forbidden
 - `credentialMode`: fixed to `none`; never request, discover, or configure an API key
 - `pixelAuthority` and `poseAuthority`
@@ -14,6 +14,8 @@ The frame contract makes source-frame lineage, processing limits, and placement 
 - `sourceFrameManifest`: mandatory for one-to-one processing with either tool
 - `sourceCorrespondenceRequired`: true for one-to-one processing
 - `perFrameAuthorityDirectory`: decoded selected native frames
+- `parentFrameManifest` and `parentFramesDirectory`: mandatory only for `gpt-image-alpha-repair`; each parent is SHA-bound to the same output/native-frame record
+- `parentCorrespondenceRequired`: true for `gpt-image-alpha-repair`
 
 The source manifest records output/native-frame order, timestamp, source filename, source SHA-256, classification, and whether RGB or geometry may change. One-to-one records require `sourceFrameRequired: true`, `geometryChanged: false`, and no holds or interpolation.
 

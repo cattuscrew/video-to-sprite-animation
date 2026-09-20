@@ -28,3 +28,18 @@ Process all selected frames individually and in order. Do not generate one maste
 Create a full-resolution source/output comparison for every frame. Review silhouette, head and pelvis position, limb articulation, hair topology, eye state, overlaps, weapon/equipment angle, both boots, and all negative spaces. Record `reviewMethod: full-frame-source-output-comparison`. Each record must bind the native frame, source filename/SHA-256, output SHA-256, and `sourceOutputComparisonArtifact`; it must state `sourcePosePreserved`, `silhouettePreserved`, `topologyPreserved`, `equipmentGeometryPreserved`, `eyeStatePreserved`, `negativeSpacesPreserved`, `noSubstitutedPose`, and `noMasterWarp`.
 
 GPT Image may change foreground pixels while cleaning the background. Pixel changes do not authorize pose changes. If an output no longer matches its mapped frame, repair that frame from the same source input or block it.
+
+## GPT-only alpha repair
+
+Use `processingMode: gpt-image-alpha-repair` only when the user wants to repair dirty transparency on an already approved one-to-one GPT sequence. Build `parent-frame-manifest.json` before generation. For output N:
+
+- use approved parent frame N as the primary edit target;
+- keep native source frame N as pose-verification authority, not as the edit target;
+- keep the canonical color reference appearance-only;
+- record the parent path/SHA-256 and native source path/SHA-256;
+- request transparency and contaminated-edge cleanup only;
+- reject changes to canvas, scale, placement, silhouette, outlines, interior RGB, topology, eyes, or equipment.
+
+The parent must be an explicitly approved foreground result tied to the same native frame. A rejected proof, neighboring output, canonical master, or synthesized frame cannot be a parent. Validate each repair against both its parent and its native source. A clean alpha cannot waive parent-geometry or source-pose failure.
+
+When the approved color strategy includes deterministic normalization, restore RGB from the approved parent only where both parent and repaired alpha are fully opaque. Preserve GPT alpha and edge RGB unchanged. This prevents interior color drift without becoming another background-removal method.

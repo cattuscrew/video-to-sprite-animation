@@ -15,22 +15,30 @@ NON_SOURCE_CLASSIFICATIONS = {
 }
 
 
-def expected_tool_fields(construction: str, tool: str) -> dict[str, str] | None:
+def expected_tool_fields(
+    construction: str, tool: str, processing_mode: str
+) -> dict[str, str] | None:
     policies = {
-        (ONE_TO_ONE, "GPT Image"): {
+        (ONE_TO_ONE, "GPT Image", "gpt-image-per-frame-edit"): {
             "processingMode": "gpt-image-per-frame-edit",
             "pixelAuthority": "gpt-edited-selected-source-frame",
             "poseAuthority": "selected-native-source-frame",
             "mappingRole": SOURCE_MAPPING_ROLE,
         },
-        (SYNTHESIZED, "GPT Image"): {
+        (ONE_TO_ONE, "GPT Image", "gpt-image-alpha-repair"): {
+            "processingMode": "gpt-image-alpha-repair",
+            "pixelAuthority": "approved-parent-frame-foreground",
+            "poseAuthority": "selected-native-source-frame",
+            "mappingRole": SOURCE_MAPPING_ROLE,
+        },
+        (SYNTHESIZED, "GPT Image", "gpt-image-regeneration"): {
             "processingMode": "gpt-image-regeneration",
             "pixelAuthority": "approved-gpt-master",
             "poseAuthority": "synthesized-from-motion-reference",
             "mappingRole": MOTION_MAPPING_ROLE,
         },
     }
-    return policies.get((construction, tool))
+    return policies.get((construction, tool, processing_mode))
 
 
 def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
@@ -45,7 +53,8 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
         errors.append("authority imageExecutionInterface must be built-in-image-tool")
     if authority.get("credentialMode") != "none":
         errors.append("authority credentialMode must be none; API credentials are forbidden")
-    expected = expected_tool_fields(str(construction), str(tool))
+    processing_mode = str(authority.get("processingMode", ""))
+    expected = expected_tool_fields(str(construction), str(tool), processing_mode)
     if expected is None:
         errors.append(
             f"backgroundRemovalTool={tool!r} cannot construct frames with "
@@ -77,6 +86,15 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
             errors.append("one-to-one processing forbids master warping")
         if approval.get("geometryPreserved") is not True:
             errors.append("one-to-one authority lacks geometryPreserved approval")
+        if processing_mode == "gpt-image-alpha-repair":
+            if not authority.get("parentFrameManifest"):
+                errors.append("alpha repair authority is missing parentFrameManifest")
+            if not authority.get("parentFramesDirectory"):
+                errors.append("alpha repair authority is missing parentFramesDirectory")
+            if approval.get("parentFrameRepairApproved") is not True:
+                errors.append("alpha repair from approved parent frames is not explicitly approved")
+        elif authority.get("parentFrameManifest") or authority.get("parentFramesDirectory"):
+            errors.append("standard per-frame editing must not claim parent-frame repair lineage")
         if tool == "GPT Image":
             if approval.get("perFrameGptEditApproved") is not True:
                 errors.append("per-frame GPT Image editing is not explicitly approved")
@@ -114,6 +132,49 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
             errors.append("synthesized processing must use motionReferenceManifest")
         if approval.get("synthesizedMotionApproved") is not True:
             errors.append("synthesized motion is not explicitly approved")
+    return errors
+
+
+def parent_frame_manifest_errors(
+    manifest: dict[str, Any], source_manifest: dict[str, Any]
+) -> list[str]:
+    """Validate the immutable parent-output lineage used by GPT alpha repair."""
+    errors: list[str] = []
+    if manifest.get("processingMode") != "gpt-image-alpha-repair":
+        errors.append("parent-frame manifest processingMode must be gpt-image-alpha-repair")
+    if manifest.get("backgroundRemovalTool") != "GPT Image":
+        errors.append("parent-frame manifest backgroundRemovalTool must be GPT Image")
+    if manifest.get("imageExecutionInterface") != "built-in-image-tool":
+        errors.append("parent-frame manifest must use built-in-image-tool")
+    if manifest.get("credentialMode") != "none":
+        errors.append("parent-frame manifest credentialMode must be none")
+    records = manifest.get("frameMapping", [])
+    source_records = source_manifest.get("frameMapping", [])
+    if not isinstance(records, list) or not records:
+        return errors + ["parent-frame manifest has no frameMapping records"]
+    if not isinstance(source_records, list) or len(records) != len(source_records):
+        return errors + ["parent-frame manifest count does not match source manifest"]
+    if manifest.get("frameCount") != len(records):
+        errors.append("parent-frame manifest frameCount does not match frameMapping length")
+    for index, (record, source) in enumerate(zip(records, source_records), start=1):
+        expected_file = f"frame-{index:03d}.png"
+        if record.get("outputFrame") != index:
+            errors.append(f"parent mapping frame {index} outputFrame is incorrect")
+        if record.get("parentFile") != expected_file:
+            errors.append(f"parent mapping frame {index} parentFile is incorrect")
+        if record.get("nativeFrame") != source.get("nativeFrame"):
+            errors.append(f"parent mapping frame {index} nativeFrame differs from source")
+        if record.get("sourceSha256") != source.get("sourceSha256"):
+            errors.append(f"parent mapping frame {index} sourceSha256 differs from source")
+        digest = record.get("parentSha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            errors.append(f"parent mapping frame {index} lacks parentSha256")
+        if record.get("parentRole") != "approved-foreground-edit-target":
+            errors.append(f"parent mapping frame {index} has invalid parentRole")
+        if record.get("classification") != "source-frame-gpt-alpha-repair":
+            errors.append(f"parent mapping frame {index} has invalid classification")
+        if record.get("geometryChanged") is not False:
+            errors.append(f"parent mapping frame {index} permits geometry drift")
     return errors
 
 
@@ -217,6 +278,13 @@ def contract_policy_errors(contract: dict[str, Any]) -> list[str]:
             errors.append("one-to-one contract lacks per-frame source authority")
         if contract.get("sourceCorrespondenceRequired") is not True:
             errors.append("one-to-one contract must require source correspondence")
+        if authority.get("processingMode") == "gpt-image-alpha-repair":
+            if not contract.get("parentFrameManifest"):
+                errors.append("alpha repair contract is missing parentFrameManifest")
+            if not contract.get("parentFramesDirectory"):
+                errors.append("alpha repair contract is missing parentFramesDirectory")
+            if contract.get("parentCorrespondenceRequired") is not True:
+                errors.append("alpha repair contract must require parent correspondence")
     elif construction == SYNTHESIZED:
         if contract.get("sourceFrameManifest"):
             errors.append("synthesized contract must not use sourceFrameManifest")
@@ -239,7 +307,11 @@ def delivery_report_errors(report: dict[str, Any], authority: dict[str, Any]) ->
     tool = authority.get("backgroundRemovalTool")
     classification = report.get("processingClassification")
     if construction == ONE_TO_ONE:
-        expected = "source-frame-gpt-edit"
+        expected = (
+            "source-frame-gpt-alpha-repair"
+            if authority.get("processingMode") == "gpt-image-alpha-repair"
+            else "source-frame-gpt-edit"
+        )
         if classification != expected:
             errors.append(f"one-to-one delivery classification must be {expected}")
         if not report.get("selectedSourceFramesOneBased"):

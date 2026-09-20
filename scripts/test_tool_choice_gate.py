@@ -69,7 +69,7 @@ class ToolChoiceGateTests(unittest.TestCase):
     def test_gpt_cannot_silently_use_regeneration_mode(self) -> None:
         value = source_authority("GPT Image")
         value["processingMode"] = "gpt-image-regeneration"
-        self.assertTrue(any("incompatible" in e for e in authority_policy_errors(value)))
+        self.assertTrue(authority_policy_errors(value))
 
 
 if __name__ == "__main__":

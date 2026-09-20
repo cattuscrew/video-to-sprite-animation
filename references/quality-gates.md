@@ -54,6 +54,8 @@ Run `scripts/validate_source_correspondence.py`. Require source SHA lineage and 
 
 For GPT per-frame editing, compare each output first with its exact mapped source and then with previous/current/next outputs. Treat changed pose, filled hair/shoulder gaps, changing eye construction, shifted equipment, or redrawn outlines as drift.
 
+For GPT alpha repair, compare in this order: approved parent/output for foreground identity, exact source/output for pose correspondence, then previous/current/next outputs for temporal stability. Reject canvas-size changes, zoom, recentering, parent foreground redraw, material-color changes, or line changes even if the new alpha looks cleaner.
+
 The GPT pose-correspondence record for every frame must explicitly accept silhouette, topology, equipment geometry, eye state, and negative spaces, and link the rendered full-frame source/output comparison used for that judgment. A generic `sourcePosePreserved` boolean is insufficient.
 
 Also compare stable material regions against the approved canonical color reference. Record per-region robust color statistics for hair, skin, primary garment, leather, wood, and metal when present. Aggregate palette means alone are insufficient: reject visible regional hue/value flicker even when the global mean passes.

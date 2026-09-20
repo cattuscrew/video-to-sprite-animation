@@ -109,12 +109,15 @@ def main() -> None:
         "--processing-mode",
         choices=(
             "gpt-image-per-frame-edit",
+            "gpt-image-alpha-repair",
             "gpt-image-regeneration",
         ),
         required=True,
     )
     parser.add_argument("--authority-manifest", required=True, type=Path)
     parser.add_argument("--source-frame-manifest", type=Path)
+    parser.add_argument("--parent-frame-manifest", type=Path)
+    parser.add_argument("--parent-frames-dir", type=Path)
     parser.add_argument("--motion-reference-manifest", type=Path)
     parser.add_argument("--per-frame-authority-dir", type=Path)
     parser.add_argument("--locked-region", action="append", default=[], type=parse_region)
@@ -162,6 +165,16 @@ def main() -> None:
             raise SystemExit("one-to-one-source must not use --motion-reference-manifest")
         mapping_manifest = json.loads(args.source_frame_manifest.read_text())
         mapping_errors = mapping_manifest_errors(mapping_manifest, ONE_TO_ONE)
+        if args.processing_mode == "gpt-image-alpha-repair":
+            if not args.parent_frame_manifest or not args.parent_frames_dir:
+                raise SystemExit(
+                    "gpt-image-alpha-repair requires --parent-frame-manifest and "
+                    "--parent-frames-dir"
+                )
+        elif args.parent_frame_manifest or args.parent_frames_dir:
+            raise SystemExit(
+                "parent-frame inputs are valid only for gpt-image-alpha-repair"
+            )
     elif construction == SYNTHESIZED:
         if args.source_frame_manifest:
             raise SystemExit("synthesized must use --motion-reference-manifest")
@@ -222,6 +235,15 @@ def main() -> None:
             if args.source_frame_manifest
             else None
         ),
+        "parentFrameManifest": (
+            str(args.parent_frame_manifest.resolve())
+            if args.parent_frame_manifest
+            else None
+        ),
+        "parentFramesDirectory": (
+            str(args.parent_frames_dir.resolve()) if args.parent_frames_dir else None
+        ),
+        "parentCorrespondenceRequired": args.processing_mode == "gpt-image-alpha-repair",
         "motionReferenceManifest": (
             str(args.motion_reference_manifest.resolve())
             if args.motion_reference_manifest

@@ -10,6 +10,7 @@ from delivery_policy import (
     delivery_mapping_errors,
     delivery_report_errors,
     mapping_manifest_errors,
+    parent_frame_manifest_errors,
     visual_qa_report_errors,
 )
 
@@ -86,6 +87,43 @@ def mapping(tool: str = "GPT Image") -> dict[str, object]:
     }
 
 
+def alpha_authority() -> dict[str, object]:
+    value = authority()
+    value.update(
+        {
+            "processingMode": "gpt-image-alpha-repair",
+            "pixelAuthority": "approved-parent-frame-foreground",
+            "parentFrameManifest": "/tmp/parent-frame-manifest.json",
+            "parentFramesDirectory": "/tmp/parent-frames",
+        }
+    )
+    value["approvalScope"]["parentFrameRepairApproved"] = True
+    return value
+
+
+def parent_mapping() -> dict[str, object]:
+    return {
+        "processingMode": "gpt-image-alpha-repair",
+        "backgroundRemovalTool": "GPT Image",
+        "imageExecutionInterface": "built-in-image-tool",
+        "credentialMode": "none",
+        "frameCount": 2,
+        "frameMapping": [
+            {
+                "outputFrame": index,
+                "nativeFrame": source["nativeFrame"],
+                "sourceSha256": source["sourceSha256"],
+                "parentFile": f"frame-{index:03d}.png",
+                "parentSha256": "b" * 64,
+                "parentRole": "approved-foreground-edit-target",
+                "classification": "source-frame-gpt-alpha-repair",
+                "geometryChanged": False,
+            }
+            for index, source in enumerate(mapping()["frameMapping"], start=1)
+        ],
+    }
+
+
 class DeliveryPolicyTests(unittest.TestCase):
     def test_rembg_one_to_one_is_rejected(self) -> None:
         self.assertTrue(authority_policy_errors(authority("rembg")))
@@ -94,6 +132,22 @@ class DeliveryPolicyTests(unittest.TestCase):
     def test_gpt_one_to_one_passes(self) -> None:
         self.assertEqual(authority_policy_errors(authority()), [])
         self.assertEqual(mapping_manifest_errors(mapping()), [])
+
+    def test_gpt_alpha_repair_requires_parent_lineage(self) -> None:
+        value = alpha_authority()
+        self.assertEqual(authority_policy_errors(value), [])
+        value.pop("parentFrameManifest")
+        self.assertTrue(
+            any("parentFrameManifest" in e for e in authority_policy_errors(value))
+        )
+
+    def test_parent_manifest_binds_same_native_sources(self) -> None:
+        self.assertEqual(parent_frame_manifest_errors(parent_mapping(), mapping()), [])
+        value = parent_mapping()
+        value["frameMapping"][1]["nativeFrame"] = 999
+        self.assertTrue(
+            any("nativeFrame differs" in e for e in parent_frame_manifest_errors(value, mapping()))
+        )
 
     def test_gpt_one_to_one_rejects_master_warp(self) -> None:
         value = authority()
@@ -157,6 +211,19 @@ class DeliveryPolicyTests(unittest.TestCase):
         self.assertEqual(delivery_mapping_errors(report, mapping()), [])
         report["selectedSourceFramesOneBased"] = [154, 156]
         self.assertTrue(delivery_mapping_errors(report, mapping()))
+
+    def test_alpha_repair_delivery_is_truthfully_classified(self) -> None:
+        report = {
+            "frameConstruction": "one-to-one-source",
+            "processingMode": "gpt-image-alpha-repair",
+            "backgroundRemovalTool": "GPT Image",
+            "imageExecutionInterface": "built-in-image-tool",
+            "credentialMode": "none",
+            "processingClassification": "source-frame-gpt-alpha-repair",
+            "selectedSourceFramesOneBased": [154, 155],
+            "sourceCorrespondenceStatus": "accepted",
+        }
+        self.assertEqual(delivery_report_errors(report, alpha_authority()), [])
 
     def test_delivery_requires_complete_visual_temporal_review(self) -> None:
         report = {
