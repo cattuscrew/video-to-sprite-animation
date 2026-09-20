@@ -191,6 +191,9 @@ def pending_frames(run: Path, limits: dict[str, int]) -> tuple[list[dict], list[
             exhausted.append(item)
         else:
             ready.append(item)
+    # Fewest attempts first, so one frame that keeps failing cannot hold up
+    # every frame behind it while it spends its budget.
+    ready.sort(key=lambda item: (item["attemptsMade"], item["outputFrame"]))
     return ready, exhausted
 
 

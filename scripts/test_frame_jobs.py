@@ -211,6 +211,19 @@ class StatusTests(unittest.TestCase):
         for frame in range(1, FRAME_COUNT + 1):
             self.assertTrue((self.run / "frames" / f"frame-{frame:03d}.png").is_file())
 
+    def test_a_failing_frame_does_not_hold_up_the_others(self) -> None:
+        """Fewest attempts first: frame 1 spending its budget must not stop
+        frames 2-4 from being generated at all."""
+        for attempt in range(1, 3):
+            record_attempt(self.run, 1, attempt, error_class=frame_jobs.MODERATION)
+        result = json.loads(run_cli("next", str(self.run)).stdout)
+        self.assertEqual(result["ready"][0]["outputFrame"], 2)
+        self.assertEqual(
+            [item["outputFrame"] for item in result["ready"]][-1],
+            1,
+            "the frame with the most attempts should be last in line",
+        )
+
     def test_a_selected_frame_leaves_the_queue(self) -> None:
         directory = record_attempt(self.run, 1, 1)
         write_png(directory / "locked.png")
