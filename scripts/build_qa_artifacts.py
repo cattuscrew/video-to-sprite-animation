@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -77,19 +78,49 @@ def write_gif(paths: list[Path], output: Path, fps: float) -> None:
     )
 
 
+# Lossless h264 still round-trips through RGB->YUV->RGB, which costs a level
+# or two. Anything beyond that is the encoder inventing detail.
+PREVIEW_MAX_CHANNEL_ERROR = 4
+
+
+def on_black(path: Path) -> Image.Image:
+    sprite = Image.open(path).convert("RGBA")
+    board = Image.new("RGBA", sprite.size, (0, 0, 0, 255))
+    board.alpha_composite(sprite)
+    return board.convert("RGB")
+
+
 def write_mp4(paths: list[Path], output: Path, fps: float) -> bool:
-    """Exact-FPS preview via ffmpeg when it is available."""
+    """Exact-FPS preview via ffmpeg when it is available.
+
+    Two things here are not defaults, and both were learned the hard way.
+
+    The frames are composited onto black in Pillow rather than by letting
+    ffmpeg drop the alpha channel, so what the encoder receives is exactly what
+    a viewer would see.
+
+    The encode is lossless 4:4:4. The obvious `format=yuv420p` at default
+    quality halves the chroma resolution and then quantises it, which on a hard
+    sprite edge against black produces ringing that looks precisely like a
+    dirty, contaminated outline. On the 2026-09-20 delivery that put 14,569
+    non-black pixels into what should have been empty space, up to 45 levels
+    off, hugging the outline -- artifacts of the preview, not of the frames.
+    Reviewing edge quality on a lossy preview cannot work.
+    """
     if not paths:
         return False
-    listing = output.parent / "_frames.txt"
     output.parent.mkdir(parents=True, exist_ok=True)
-    listing.write_text("".join(f"file '{path.resolve()}'\nduration {1/fps:.6f}\n" for path in paths))
+    staging = output.parent / f"_{output.stem}-frames"
+    staging.mkdir(parents=True, exist_ok=True)
     try:
+        for index, path in enumerate(paths, start=1):
+            on_black(path).save(staging / f"frame-{index:04d}.png")
         subprocess.run(
             [
-                "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-                "-i", str(listing), "-r", str(fps),
-                "-vf", "format=yuv420p,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-framerate", str(fps),
+                "-i", str(staging / "frame-%04d.png"),
+                "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p",
                 str(output),
             ],
             check=True,
@@ -99,7 +130,53 @@ def write_mp4(paths: list[Path], output: Path, fps: float) -> bool:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
     finally:
-        listing.unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def preview_fidelity(video: Path, paths: list[Path]) -> dict[str, object]:
+    """Decode the preview back and compare it with the frames it claims to show.
+
+    A preview is evidence, so it has to be checked like evidence. Without this
+    the reviewer is judging the encoder as much as the sprites, and a defect
+    the encoder invented is indistinguishable from one the image tool did.
+    """
+    result: dict[str, object] = {"video": str(video)}
+    if not video.is_file() or not paths:
+        result["status"] = "not-checked"
+        return result
+    decoded = video.parent / f"_{video.stem}-decoded.png"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video),
+             "-vframes", "1", str(decoded)],
+            check=True,
+            capture_output=True,
+        )
+        actual = np.asarray(Image.open(decoded).convert("RGB"), dtype=np.int16)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        result["status"] = "not-checked"
+        return result
+    finally:
+        decoded.unlink(missing_ok=True)
+
+    expected = np.asarray(on_black(paths[0]), dtype=np.int16)
+    if actual.shape != expected.shape:
+        result.update({"status": "repair-needed", "error": "preview size differs"})
+        return result
+    difference = np.abs(actual - expected).max(axis=2)
+    transparent = np.asarray(Image.open(paths[0]).convert("RGBA"))[:, :, 3] == 0
+    result.update(
+        {
+            "maxChannelError": int(difference.max()),
+            "pixelsAlteredInEmptySpace": int((difference[transparent] > 0).sum()),
+            "status": (
+                "accepted"
+                if difference.max() <= PREVIEW_MAX_CHANNEL_ERROR
+                else "repair-needed"
+            ),
+        }
+    )
+    return result
 
 
 def onion_sheet(paths: list[Path], output: Path) -> None:
@@ -292,6 +369,8 @@ def main() -> int:
         manifest, args.manifest, numbers, paths, pairs, args.source_pairs
     )
 
+    fidelity = preview_fidelity(exact, paths)
+
     checks = {
         "normalSpeed": "normalSpeedReviewed",
         "slowSpeed": "slowSpeedReviewed",
@@ -306,7 +385,13 @@ def main() -> int:
     if unknown:
         raise SystemExit(f"unknown checks: {sorted(unknown)}; known: {sorted(checks)}")
     done = {flag: (name in requested) for name, flag in checks.items()}
-    complete = all(done.values()) and not missing
+    # A preview that does not match its frames is not evidence about the
+    # frames, so no amount of reviewing it can complete the report.
+    complete = (
+        all(done.values())
+        and not missing
+        and fidelity.get("status") != "repair-needed"
+    )
 
     report = {
         "status": "accepted" if complete else "pending-review",
@@ -315,6 +400,7 @@ def main() -> int:
         "reviewer": args.reviewer,
         "frameCount": len(paths),
         "missingFrames": missing,
+        "previewFidelity": fidelity,
         "flaggedFrames": flagged,
         "tripletSheets": triplet_count,
         "comparisonSheets": pair_count,
@@ -337,6 +423,7 @@ def main() -> int:
                 "outstandingChecks": report["outstandingChecks"],
                 "frameCount": report["frameCount"],
                 "missingFrames": missing,
+        "previewFidelity": fidelity,
                 "tripletSheets": triplet_count,
                 "comparisonSheets": pair_count,
                 "report": str(destination),
