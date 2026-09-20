@@ -36,6 +36,8 @@ Reject or repair a frame when:
 
 ## Sequence inspection
 
+Render the artifacts before judging: `scripts/build_qa_artifacts.py` writes the exact-FPS preview, the slowed preview, triplets for the flagged frames, a whole-batch onion sheet, and per-frame comparisons against both the approved parent and the mapped native frame. It sets every reviewed flag false, because rendering a picture is not the same as having seen it. A reviewer sets them; the delivery gate then checks each named artifact exists.
+
 Inspect at normal speed, slow speed, and as previous/current/next triplets. Use:
 
 - a fixed pivot crosshair
