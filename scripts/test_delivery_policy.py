@@ -197,8 +197,9 @@ class DeliveryPolicyTests(unittest.TestCase):
             any("source-frame-gpt-edit" in e for e in delivery_report_errors(report, authority()))
         )
 
-    def test_delivery_requires_complete_visual_temporal_review(self) -> None:
-        report = {
+    @staticmethod
+    def visual_qa() -> dict[str, object]:
+        return {
             "status": "accepted",
             "normalSpeedReviewed": True,
             "slowSpeedReviewed": True,
@@ -208,6 +209,7 @@ class DeliveryPolicyTests(unittest.TestCase):
             "sourceMotionCompared": True,
             "topologyAndLandmarksReviewed": True,
             "reviewer": "agent",
+            "previewFidelity": {"status": "accepted", "maxChannelError": 2},
             "artifacts": {
                 "exactFpsPreview": "/tmp/normal.mp4",
                 "slowPreview": "/tmp/slow.mp4",
@@ -216,6 +218,21 @@ class DeliveryPolicyTests(unittest.TestCase):
                 "sourceMotionComparison": "/tmp/source-motion.png",
             },
         }
+
+    def test_a_preview_that_misrepresents_its_frames_blocks_delivery(self) -> None:
+        report = self.visual_qa()
+        report["previewFidelity"] = {"status": "repair-needed", "maxChannelError": 252}
+        self.assertTrue(
+            any("does not match the frames" in e for e in visual_qa_report_errors(report))
+        )
+
+    def test_a_missing_preview_fidelity_check_blocks_delivery(self) -> None:
+        report = self.visual_qa()
+        report.pop("previewFidelity", None)
+        self.assertTrue(any("previewFidelity" in e for e in visual_qa_report_errors(report)))
+
+    def test_delivery_requires_complete_visual_temporal_review(self) -> None:
+        report = self.visual_qa()
         self.assertEqual(visual_qa_report_errors(report), [])
         report["onionSkinReviewed"] = False
         self.assertTrue(any("onionSkinReviewed" in error for error in visual_qa_report_errors(report)))

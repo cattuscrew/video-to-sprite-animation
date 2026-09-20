@@ -47,6 +47,7 @@ def main() -> int:
     parser.add_argument("delivery_report", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--source-correspondence-report", type=Path)
+    parser.add_argument("--color-stability-report", type=Path)
     parser.add_argument("--visual-qa-report", type=Path, required=True)
     args = parser.parse_args()
 
@@ -85,6 +86,21 @@ def main() -> int:
                 errors.append(f"visual QA artifact does not exist: {name}")
     accepted(frame_report, "frame validation report", errors)
     accepted(temporal_report, "temporal validation report", errors)
+    # Colour flicker is invisible to every other report here: the per-frame
+    # checks pass a frame that is 2 levels off beside one 9 off, and the
+    # temporal report measures geometry. A gate that exists but is not required
+    # is a gate that gets skipped.
+    if authority.get("backgroundRemovalTool") == "GPT Image":
+        if not args.color_stability_report:
+            errors.append("GPT Image delivery requires --color-stability-report")
+        else:
+            colour = load_json(args.color_stability_report, "colour stability report", errors)
+            accepted(colour, "colour stability report", errors)
+            if colour and colour.get("measuredPer") != "material":
+                errors.append(
+                    "colour stability must be measured per material; an average "
+                    "over the character cancels materials that drift apart"
+                )
 
     construction = authority.get("frameConstruction")
     correspondence_status = "not-provided"

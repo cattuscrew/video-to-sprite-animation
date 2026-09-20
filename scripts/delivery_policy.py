@@ -385,6 +385,16 @@ def visual_qa_report_errors(report: dict[str, Any]) -> list[str]:
         ):
             if not artifacts.get(field):
                 errors.append(f"visual QA report lacks {field} artifact")
+    # A preview that does not match its frames is not evidence about them.
+    fidelity = report.get("previewFidelity")
+    if not isinstance(fidelity, dict):
+        errors.append("visual QA report lacks previewFidelity")
+    elif fidelity.get("status") == "repair-needed":
+        errors.append(
+            "the preview does not match the frames it claims to show; edge "
+            "quality reviewed on it is a review of the encoder"
+        )
+
     reviewer = report.get("reviewer")
     if reviewer not in {"agent", "user", "agent-and-user"}:
         errors.append("visual QA report has invalid reviewer")
