@@ -145,9 +145,15 @@ def quadrant_spread(
 
 
 def premultiplied_shift_and_fit(
-    image: np.ndarray, dx: float, dy: float, canvas: tuple[int, int]
+    image: np.ndarray, dx: float, dy: float, canvas: tuple[int, int], pad: int = 8
 ) -> np.ndarray:
-    """Translate and scale to the contract canvas in a single resample.
+    """Translate and scale to the contract canvas in one resample.
+
+    The shift rides on the resize as a source window rather than happening
+    first: resampling twice softens the outline and, worse, leaves the sprite
+    up to 0.2px from where it was asked to go, which is most of the drift
+    budget spent on the arithmetic rather than on the image. The window is
+    padded because it may start left of or above the origin.
 
     Compositing in premultiplied space keeps colour from bleeding out of the
     transparent side of the outline; a straight RGBA resize would drag the
@@ -159,12 +165,13 @@ def premultiplied_shift_and_fit(
         [image[:, :, channel].astype(np.float64) * alpha for channel in range(3)]
         + [alpha * 255.0]
     )
-    shifted = np.dstack(
-        [sample_shifted(premultiplied[:, :, c], dx, dy) for c in range(4)]
-    )
+    margin = max(pad, int(abs(dx)) + 2, int(abs(dy)) + 2)
+    padded = np.pad(premultiplied, ((margin, margin), (margin, margin), (0, 0)))
     resized = np.asarray(
-        Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8), "RGBA").resize(
-            canvas, Image.LANCZOS
+        Image.fromarray(np.clip(padded, 0, 255).astype(np.uint8), "RGBA").resize(
+            canvas,
+            Image.LANCZOS,
+            box=(margin + dx, margin + dy, margin + dx + width, margin + dy + height),
         ),
         dtype=np.float64,
     )

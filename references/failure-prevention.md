@@ -53,6 +53,8 @@ Two causes, both fixed without an image call:
 
 Neither was sufficient alone. Together they brought the sequence back to the authority's own level, with every frame within 0.074px of its parent.
 
+Register in one resample. Shifting and then resizing softens the outline and leaves the sprite up to 0.2px from where it was asked to go -- most of a drift budget spent on arithmetic rather than on the image. Folding the shift into the resize as a source window is both sharper and about six times truer. It also reports slightly more drift on real frames, because the softer path was blurring the evidence away; that extra drift is signal.
+
 Run the sequence gates as frames land, not once at the end, and run `scripts/preflight_parent_headroom.py` before the first image call: where an authority transition has already spent its budget, no per-frame accuracy will save it.
 
 ## Close the validation blind spot
