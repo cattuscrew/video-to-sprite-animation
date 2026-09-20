@@ -92,11 +92,35 @@ def main() -> int:
         "--accept",
         metavar="REVIEWER",
         help=(
-            "record that a reviewer inspected every comparison and accepted it. "
+            "record that a reviewer inspected the comparisons and accepted them. "
             "Only pass this after actually looking at them."
         ),
     )
+    parser.add_argument(
+        "--accept-frames",
+        help=(
+            "comma-separated frames or ranges (e.g. 1-8,12) this reviewer looked "
+            "at. Without it --accept covers every frame. Frames left out stay "
+            "pending, so a partial review is recorded as a partial review."
+        ),
+    )
     args = parser.parse_args()
+
+    reviewed: set[int] | None = None
+    if args.accept_frames:
+        reviewed = set()
+        for part in args.accept_frames.split(","):
+            part = part.strip()
+            if "-" in part:
+                start, end = part.split("-", 1)
+                reviewed.update(range(int(start), int(end) + 1))
+            elif part:
+                reviewed.add(int(part))
+
+    def accepted(frame: int) -> bool:
+        if not args.accept:
+            return False
+        return reviewed is None or frame in reviewed
 
     manifest = json.loads(args.source_manifest.read_text())
     source_dir = Path(manifest["sourceFramesDirectory"])
@@ -146,19 +170,21 @@ def main() -> int:
             "sourceFile": record.get("sourceFile"),
             "sourceSha256": sha256(source_path) if source_path.is_file() else None,
             "outputSha256": sha256(output_path),
-            "status": "accepted" if args.accept else "pending-review",
+            "status": "accepted" if accepted(index) else "pending-review",
             "sourceOutputComparisonArtifact": str(artifact.relative_to(args.output)),
             # A checksum cannot see a redrawn eye. These are for a reviewer.
-            **{key: bool(args.accept) for key in JUDGEMENTS},
+            **{key: accepted(index) for key in JUDGEMENTS},
         }
         if parent_path is not None and parent_path.is_file():
             entry["parentSha256"] = sha256(parent_path)
             entry["parentOutputComparisonArtifact"] = str(artifact.relative_to(args.output))
-            entry.update({key: bool(args.accept) for key in PARENT_JUDGEMENTS})
+            entry.update({key: accepted(index) for key in PARENT_JUDGEMENTS})
         records.append(entry)
 
+    pending = [r["outputFrame"] for r in records if r["status"] != "accepted"]
     report = {
-        "status": "accepted" if (args.accept and not missing) else "pending-review",
+        "status": "accepted" if (args.accept and not missing and not pending) else "pending-review",
+        "pendingFrames": pending,
         "reviewMethod": "full-frame-source-output-comparison",
         "reviewer": args.accept or None,
         "frameCount": len(records),

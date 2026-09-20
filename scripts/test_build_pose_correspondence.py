@@ -112,6 +112,15 @@ class PoseReportTests(unittest.TestCase):
         blocked = next(f for f in report["frames"] if f["outputFrame"] == 3)
         self.assertEqual(blocked["status"], "user-visible-blocked")
 
+    def test_a_partial_review_is_recorded_as_partial(self) -> None:
+        report, _ = self.build("--accept", "agent", "--accept-frames", "1-2")
+        self.assertEqual(report["status"], "pending-review")
+        self.assertEqual(report["pendingFrames"], [3, 4])
+        first = next(f for f in report["frames"] if f["outputFrame"] == 1)
+        third = next(f for f in report["frames"] if f["outputFrame"] == 3)
+        self.assertTrue(first["sourcePosePreserved"])
+        self.assertFalse(third["sourcePosePreserved"])
+
 
 if __name__ == "__main__":
     unittest.main()
