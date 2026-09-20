@@ -121,6 +121,17 @@ class PoseReportTests(unittest.TestCase):
         self.assertTrue(first["sourcePosePreserved"])
         self.assertFalse(third["sourcePosePreserved"])
 
+    def test_region_strips_cover_every_landed_frame(self) -> None:
+        report, root = self.build("--region-strips")
+        strips = root / "qa" / "region-strips"
+        self.assertTrue(strips.is_dir())
+        self.assertEqual(len(list(strips.glob("*.png"))), 4)
+
+    def test_fragile_crops_are_rendered_per_frame(self) -> None:
+        report, root = self.build("--fragile-crops")
+        fragile = root / "qa" / "fragile"
+        self.assertEqual(len(list(fragile.glob("*.png"))), FRAME_COUNT)
+
 
 if __name__ == "__main__":
     unittest.main()

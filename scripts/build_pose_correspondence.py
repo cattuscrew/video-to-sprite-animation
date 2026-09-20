@@ -150,6 +150,57 @@ def fragile_strip(
     return sheet
 
 
+def region_strip(
+    frames: list[tuple[int, Path]], region: str, zoom: float = 1.4, per_row: int = 6
+) -> Image.Image:
+    """One fragile region across the whole sequence.
+
+    A redrawn eye, a weapon that changed angle or a gap that filled in is hard
+    to see against the frame's own parent, where the difference is small and
+    expected. Against the frames either side it is obvious: everything moves
+    smoothly except the one that does not. This is the view the numeric gates
+    cannot give, because they measure silhouettes and not what is drawn inside.
+    """
+    x0, y0, x1, y1 = FRAGILE_REGIONS[region]
+    tiles: list[tuple[int, Image.Image]] = []
+    for number, path in frames:
+        image = on_checker(path)
+        left, top, right, bottom = visible_box(path)
+        width, height = right - left, bottom - top
+        patch = image.crop(
+            (
+                left + int(x0 * width),
+                top + int(y0 * height),
+                left + int(x1 * width),
+                top + int(y1 * height),
+            )
+        )
+        patch = patch.resize(
+            (max(1, int(patch.width * zoom)), max(1, int(patch.height * zoom))),
+            Image.NEAREST,
+        )
+        tiles.append((number, patch))
+
+    tile_width = max(t.width for _, t in tiles)
+    tile_height = max(t.height for _, t in tiles)
+    label = 15
+    rows = (len(tiles) + per_row - 1) // per_row
+    sheet = Image.new(
+        "RGB",
+        (tile_width * min(per_row, len(tiles)), label + rows * (tile_height + label)),
+        (24, 24, 24),
+    )
+    draw = ImageDraw.Draw(sheet)
+    draw.text((4, 2), f"{region} across the sequence", fill="white")
+    for position, (number, patch) in enumerate(tiles):
+        row, column = divmod(position, per_row)
+        x = column * tile_width
+        y = label + row * (tile_height + label)
+        draw.text((x + 3, y + 1), f"{number:03d}", fill="#9ad")
+        sheet.paste(patch, (x, y + label))
+    return sheet
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_manifest", type=Path)
@@ -160,6 +211,12 @@ def main() -> int:
         "--fragile-crops",
         action="store_true",
         help="also render 4x crops of the fragile regions, parent over output",
+    )
+    parser.add_argument(
+        "--region-strips",
+        action="store_true",
+        help="render each fragile region across the whole sequence, for spotting "
+        "the one frame that does not move like its neighbours",
     )
     parser.add_argument(
         "--accept",
@@ -258,6 +315,17 @@ def main() -> int:
             entry["parentOutputComparisonArtifact"] = str(artifact.relative_to(args.output))
             entry.update({key: accepted(index) for key in PARENT_JUDGEMENTS})
         records.append(entry)
+
+    if args.region_strips:
+        landed = [
+            (int(r["outputFrame"]), args.frames / str(r.get("outputFile") or f"frame-{int(r['outputFrame']):03d}.png"))
+            for r in manifest.get("frameMapping", [])
+            if (args.frames / str(r.get("outputFile") or f"frame-{int(r['outputFrame']):03d}.png")).is_file()
+        ]
+        strips = args.output / "region-strips"
+        strips.mkdir(parents=True, exist_ok=True)
+        for region in FRAGILE_REGIONS:
+            region_strip(landed, region).save(strips / f"{region}.png")
 
     pending = [r["outputFrame"] for r in records if r["status"] != "accepted"]
     report = {
