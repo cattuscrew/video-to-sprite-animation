@@ -206,3 +206,52 @@ class NormalizeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LockSourceInteriorTests(unittest.TestCase):
+    """The tool decides transparency; the source decides what the pixels look
+    like. Line boil is the tool redrawing, so the cure is not to use its
+    drawing where the source has one."""
+
+    def test_the_interior_becomes_the_source_exactly(self) -> None:
+        import lock_source_interior
+
+        source = source_frame()
+        locked, record = lock_source_interior.lock(output_frame(20), source)
+        self.assertEqual(record["status"], "accepted")
+        region = lock_source_interior.locked_region(output_frame(20), source)
+        self.assertTrue(region.any())
+        self.assertTrue(
+            np.array_equal(locked[:, :, :3][region], source[:, :, :3][region])
+        )
+
+    def test_alpha_is_the_tools_and_is_never_touched(self) -> None:
+        import lock_source_interior
+
+        original = output_frame(20)
+        locked, _ = lock_source_interior.lock(original, source_frame())
+        self.assertTrue(np.array_equal(locked[:, :, 3], original[:, :, 3]))
+
+    def test_green_pixels_are_never_copied_in(self) -> None:
+        """The source's own anti-aliased boundary is blended with the screen.
+        Copying it where the tool says opaque paints the spill back on."""
+        import lock_source_interior
+        from source_foreground import green_excess
+
+        source = source_frame()
+        region = lock_source_interior.locked_region(output_frame(), source)
+        self.assertTrue(region.any())
+        self.assertLess(int(green_excess(source)[region].max()), 0)
+
+    def test_two_frames_drawn_differently_become_identical_inside(self) -> None:
+        """The whole point: whatever the tool did to the linework, the interior
+        of neighbouring frames now comes from one unchanging source."""
+        import lock_source_interior
+
+        source = source_frame()
+        first, _ = lock_source_interior.lock(output_frame(14), source)
+        second, _ = lock_source_interior.lock(output_frame(-14), source)
+        region = lock_source_interior.locked_region(output_frame(), source)
+        self.assertTrue(
+            np.array_equal(first[:, :, :3][region], second[:, :, :3][region])
+        )

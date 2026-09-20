@@ -57,6 +57,14 @@ The built-in image tool takes three arguments: a prompt, referenced image paths,
   Nothing that looks at a frame on its own can see this, because the frame is
   self-consistent; only measuring it against its own source can. Asking the
   prompt not to enlarge does not prevent it -- retry and reject does.
+- Even an accepted frame is redrawn, not cut out. The linework is re-rendered
+  every time and lands a fraction of a pixel differently: between neighbouring
+  delivered frames 2.29% of interior pixels swung over 40 luma levels, and
+  those pixels sat on the artwork's lines at 66 times the local gradient of the
+  flat areas. It reads as shimmer on every outline, eye, seam and rivet. It is
+  not colour, so no colour gate or colour pass touches it, and no threshold
+  reaches it. The remedy is to stop using the tool's drawing where the source
+  has one, keeping only its alpha.
 - Because of that rate, a frame needs about four attempts on average. Retry
   budgets of 4 safety / 2 quality blocked a third of a batch on the quality
   budget alone while the frames themselves were fine.
