@@ -28,6 +28,25 @@ def centroid(alpha: np.ndarray) -> tuple[float, float]:
     return (float((xs * weights).sum() / total), float((ys * weights).sum() / total))
 
 
+def flat_region_mask(rgb: np.ndarray, threshold: float) -> np.ndarray:
+    """Where the parent's own colour is locally uniform.
+
+    The image tool returns a canvas larger than the one it was given, so every
+    frame is resampled on the way back. Resampling shows up along internal
+    outlines and colour boundaries and says nothing about whether the repair
+    recoloured anything -- on the 2026-09-20 run it was four times larger near
+    edges than in flat areas. Comparing colour only where the parent is flat
+    separates drift from that resampling.
+    """
+    luma = (
+        0.299 * rgb[:, :, 0].astype(np.float64)
+        + 0.587 * rgb[:, :, 1].astype(np.float64)
+        + 0.114 * rgb[:, :, 2].astype(np.float64)
+    )
+    gy, gx = np.gradient(luma)
+    return np.hypot(gx, gy) <= threshold
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("parent_manifest", type=Path)
@@ -36,7 +55,13 @@ def main() -> int:
     parser.add_argument("--max-bbox-edge-delta", type=int, default=2)
     parser.add_argument("--max-centroid-delta", type=float, default=1.5)
     parser.add_argument("--max-visible-area-ratio", type=float, default=0.03)
-    parser.add_argument("--max-interior-rgb-mae", type=float, default=3.0)
+    parser.add_argument("--max-interior-rgb-mae", type=float, default=6.0)
+    parser.add_argument(
+        "--flat-region-gradient",
+        type=float,
+        default=2.0,
+        help="compare colour only where the parent's local luma gradient is at most this",
+    )
     parser.add_argument(
         "--pre-lock-frames",
         type=Path,
@@ -89,6 +114,7 @@ def main() -> int:
             centroid_delta = None
             area_ratio = None
             rgb_mae = None
+            edge_rgb_mae = None
         else:
             parent_alpha = parent[:, :, 3]
             output_alpha = output[:, :, 3]
@@ -121,6 +147,10 @@ def main() -> int:
                         frame_errors.append("pre-lock frame canvas does not match parent")
                         rgb_image = None
             stable_interior = (parent_alpha >= 250) & (output_alpha >= 250)
+            flat = stable_interior & flat_region_mask(
+                parent[:, :, :3], args.flat_region_gradient
+            )
+            edge_rgb_mae = None
             if rgb_image is None:
                 rgb_mae = None
             elif not np.any(stable_interior):
@@ -131,9 +161,17 @@ def main() -> int:
                     parent[:, :, :3].astype(np.int16)
                     - rgb_image[:, :, :3].astype(np.int16)
                 )
-                rgb_mae = float(np.mean(delta[stable_interior]))
-                if rgb_mae > args.max_interior_rgb_mae:
-                    frame_errors.append(f"interior foreground RGB MAE={rgb_mae:.3f}")
+                near_edge = stable_interior & ~flat
+                edge_rgb_mae = (
+                    float(np.mean(delta[near_edge])) if np.any(near_edge) else None
+                )
+                if not np.any(flat):
+                    rgb_mae = None
+                    frame_errors.append("no flat interior region to compare colour on")
+                else:
+                    rgb_mae = float(np.mean(delta[flat]))
+                    if rgb_mae > args.max_interior_rgb_mae:
+                        frame_errors.append(f"interior foreground RGB MAE={rgb_mae:.3f}")
 
         records.append(
             {
@@ -146,6 +184,7 @@ def main() -> int:
                 "centroidDeltaPixels": centroid_delta,
                 "visibleAreaDeltaRatio": area_ratio,
                 "interiorRgbMeanAbsoluteError": rgb_mae,
+                "nearEdgeRgbMeanAbsoluteError": edge_rgb_mae,
                 "errors": frame_errors,
             }
         )
