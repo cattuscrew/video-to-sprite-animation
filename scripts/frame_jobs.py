@@ -393,6 +393,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     limits = budgets(args.run)
     python = args.python or sys.executable
     here = Path(__file__).resolve().parent
+    use_worker = args.worker if str(args.worker).lower() != "none" else None
     processed = 0
 
     while True:
@@ -411,13 +412,24 @@ def cmd_run(args: argparse.Namespace) -> int:
         frame = item["outputFrame"]
         attempt = item["nextAttempt"]
         directory = job_dir(args.run, frame) / f"attempt-{attempt:03d}"
+        if not use_worker and not (directory / "raw.png").is_file():
+            # No worker and no pre-staged image means nothing can ever produce
+            # one. Recording an attempt here spends a retry budget on a
+            # misconfiguration, which is how a run burns every frame's budget
+            # without making a single request. Checked before the directory is
+            # created, so a stopped run leaves nothing behind.
+            raise SystemExit(
+                f"frame {frame}: no worker configured and no "
+                f"{directory / 'raw.png'} to use. Pass --worker, or stage "
+                "raw.png for each attempt first."
+            )
         directory.mkdir(parents=True, exist_ok=True)
         job = read_json(job_dir(args.run, frame) / "job.json")
         processed += 1
 
-        if args.worker:
+        if use_worker:
             worker = subprocess.run(
-                [python, str(args.worker), str(args.run), str(frame), str(attempt)],
+                [python, str(use_worker), str(args.run), str(frame), str(attempt)],
                 capture_output=True,
                 text=True,
             )
@@ -525,7 +537,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     return cmd_status(argparse.Namespace(run=args.run))
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -556,12 +568,20 @@ def main() -> int:
 
     run = sub.add_parser("run", help="drive the queue to completion")
     run.add_argument("run", type=Path)
-    run.add_argument("--worker", type=Path, help="script that produces attempt raw.png")
+    run.add_argument(
+        "--worker",
+        type=Path,
+        default=Path(__file__).resolve().parent / "run_frame_worker.py",
+        help="script that produces attempt raw.png; --worker none to pre-stage it",
+    )
     run.add_argument("--python", help="interpreter for the numpy/Pillow scripts")
     run.add_argument("--max-attempts", type=int, default=0)
     run.set_defaults(func=cmd_run)
+    return parser
 
-    args = parser.parse_args()
+
+def main() -> int:
+    args = build_parser().parse_args()
     return args.func(args)
 
 

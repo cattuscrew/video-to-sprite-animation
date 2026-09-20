@@ -163,6 +163,33 @@ class BudgetTests(unittest.TestCase):
         self.assertNotIn(1, self.ready_frames())
 
 
+class WorkerConfigurationTests(unittest.TestCase):
+    """A misconfigured driver must not spend retry budgets doing nothing."""
+
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory()
+        self.root = Path(self._directory.name)
+        self.run = self.root / "run"
+        run_cli("init", str(self.run), str(manifest(self.root)))
+
+    def tearDown(self) -> None:
+        self._directory.cleanup()
+
+    def test_no_worker_and_no_staged_image_stops_instead_of_retrying(self) -> None:
+        result = run_cli("run", str(self.run), "--worker", "none")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no worker configured", result.stderr + result.stdout)
+        attempts = list((self.run / "jobs").glob("*/attempt-*"))
+        self.assertEqual(attempts, [], "a misconfiguration must cost no attempts")
+
+    def test_the_worker_defaults_to_the_bundled_one(self) -> None:
+        import frame_jobs as module
+
+        parser = module.build_parser()
+        args = parser.parse_args(["run", str(self.run)])
+        self.assertEqual(Path(args.worker).name, "run_frame_worker.py")
+
+
 class StatusTests(unittest.TestCase):
     def setUp(self) -> None:
         self._directory = tempfile.TemporaryDirectory()

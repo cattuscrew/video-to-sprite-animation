@@ -9,10 +9,18 @@ against native frame N-1 as well, so "it matches its source" is not evidence it
 is the right frame. It must match its own source better than either
 neighbour's.
 
-Drift, against a fixed target rather than against whatever landed nearby.
-A neighbour-relative check depends on arrival order and cannot be re-run
-cheaply; a fixed target taken from the approved proof frame is order-free, so
-a frame can be accepted the moment it lands and never revisited.
+Placement, taken from the registration record rather than recomputed here.
+register_to_authority fits the output onto its native frame on the eroded
+opaque interior and rejects anything it cannot bring within 0.05px, so by the
+time a frame reaches this script its placement is already guaranteed, measured
+the same way on both images.
+
+This script used to recompute drift as the distance between the output's alpha
+centroid and the source's chroma centroid. Those are two different definitions
+of an edge, and the gap between them is not misplacement: across 48 frames
+known to be correctly placed it ran 0.42 to 2.50 pixels, median 0.98, almost
+all of it vertical. Gated at 0.35px it failed every one of them. The offset is
+still reported, because it is worth seeing; it is no longer a verdict.
 
 Appearance. The tool is asked to remove a background, not to repaint. Interior
 colour and the artwork's own outlines are compared with the frame's native
@@ -206,6 +214,12 @@ def main() -> int:
     parser.add_argument("frame", type=int)
     parser.add_argument("attempt", type=int)
     parser.add_argument(
+        "--max-remaining-shift",
+        type=float,
+        default=0.05,
+        help="how much registration may leave unresolved, in pixels",
+    )
+    parser.add_argument(
         "--drift-radius",
         type=float,
         default=DEFAULT_DRIFT_RADIUS,
@@ -279,20 +293,30 @@ def main() -> int:
 
     errors.extend(appearance_failures(output, authority, check))
 
-    # Order-independent drift: measured against this frame's own authority and
-    # compared with a fixed approved target, never with whatever landed nearby.
-    target = np.array(args.drift_target if args.drift_target else (0.0, 0.0))
-    drift = centroid(foreground_mask(output)) - centroid(foreground_mask(authority))
-    deviation = float(np.linalg.norm(drift - target))
-    check["driftPixels"] = [round(float(drift[0]), 4), round(float(drift[1]), 4)]
-    check["driftTargetPixels"] = [round(float(target[0]), 4), round(float(target[1]), 4)]
-    check["driftDeviationPixels"] = round(deviation, 4)
-    check["driftRadiusPixels"] = args.drift_radius
-    if deviation > args.drift_radius:
-        errors.append(
-            f"drift sits {deviation:.3f}px from the approved target, outside "
-            f"{args.drift_radius}px"
-        )
+    # Placement comes from registration, which measured it on the same pixels
+    # in both images. Reported here, not re-derived.
+    registration = directory / "check.json"
+    if registration.is_file():
+        record_in = json.loads(registration.read_text())
+        for key in ("dx", "dy", "shiftPixels", "remainingShiftPixels", "areaDeviation"):
+            if key in record_in:
+                check[key] = record_in[key]
+        remaining = record_in.get("remainingShiftPixels")
+        if remaining is not None and float(remaining) > args.max_remaining_shift:
+            errors.append(
+                f"registration left {float(remaining):.3f}px unresolved, over "
+                f"{args.max_remaining_shift}px"
+            )
+    else:
+        errors.append("no registration record; the attempt was not registered")
+
+    # Measured, not gated: the alpha and chroma silhouettes disagree about the
+    # edge by about a pixel even when placement is exact.
+    offset = centroid(foreground_mask(output)) - centroid(foreground_mask(authority))
+    check["silhouetteCentroidOffsetPixels"] = [
+        round(float(offset[0]), 4),
+        round(float(offset[1]), 4),
+    ]
 
     # Neighbour gates, only among frames already selected. A frame that has not
     # landed is simply absent; nothing stands in for it.

@@ -67,9 +67,27 @@ class AttemptCheckTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._directory.cleanup()
 
-    def place(self, frame: int, image: np.ndarray, attempt: int = 1) -> Path:
+    def place(
+        self,
+        frame: int,
+        image: np.ndarray,
+        attempt: int = 1,
+        remaining: float = 0.0,
+    ) -> Path:
         directory = self.run / "jobs" / f"{frame:03d}" / f"attempt-{attempt:03d}"
         save(directory / "locked.png", image)
+        (directory / "check.json").write_text(
+            json.dumps(
+                {
+                    "status": "accepted",
+                    "dx": 0.0,
+                    "dy": 0.0,
+                    "shiftPixels": 0.0,
+                    "remainingShiftPixels": remaining,
+                    "areaDeviation": 0.0,
+                }
+            )
+        )
         shutil.copyfile(directory / "locked.png", directory / "raw.png")
         (directory / "record.json").write_text(
             json.dumps(
@@ -156,29 +174,27 @@ class AttemptCheckTests(unittest.TestCase):
         self.assertEqual(report["status"], "repair-needed")
         self.assertTrue(any("wrong frame" in e for e in report["errors"]))
 
-    def test_drift_beyond_the_radius_is_rejected(self) -> None:
-        self.place(3, sprite(16.0 + 1.0))
-        report = self.check(3, 1, "--drift-radius", "0.35")
+    def test_unresolved_registration_is_rejected(self) -> None:
+        self.place(3, sprite(16), remaining=0.4)
+        report = self.check(3)
         self.assertEqual(report["status"], "repair-needed")
-        self.assertTrue(any("approved target" in e for e in report["errors"]))
+        self.assertTrue(any("unresolved" in e for e in report["errors"]), report["errors"])
 
-    def test_drift_is_measured_against_the_approved_target(self) -> None:
-        """A constant offset shared by every frame is placement, not jitter, so
-        an approved target absolves it while the same drift without one fails."""
-        self.place(3, sprite(17))
-        without = self.check(3, 1, "--drift-radius", "0.35")
-        self.assertEqual(without["status"], "repair-needed")
-        self.assertTrue(any("approved target" in e for e in without["errors"]))
-        with_target = self.check(3, 1, "--drift-radius", "0.35", "--drift-target", "1.0", "0")
-        self.assertEqual(with_target["status"], "accepted", with_target["errors"])
+    def test_an_unregistered_attempt_cannot_be_accepted(self) -> None:
+        directory = self.place(3, sprite(16))
+        (directory / "check.json").unlink()
+        report = self.check(3)
+        self.assertEqual(report["status"], "repair-needed")
+        self.assertTrue(any("not registered" in e for e in report["errors"]))
 
-    def test_a_frame_drifted_halfway_is_a_drift_failure_not_an_identity_one(self) -> None:
-        """Sitting midway between two authorities ties on identity. That is
-        drift, and only the drift gate should speak."""
-        self.place(3, sprite(17))
-        report = self.check(3, 1, "--drift-radius", "0.35")
-        self.assertFalse(any("wrong frame" in e for e in report["errors"]))
-        self.assertTrue(any("approved target" in e for e in report["errors"]))
+    def test_the_silhouette_offset_is_reported_but_does_not_fail_a_frame(self) -> None:
+        """Alpha and chroma disagree about an edge by about a pixel even when
+        placement is exact. Gating that offset failed all 48 frames of a
+        delivery known to be correctly placed, so it is a measurement now."""
+        self.place(3, sprite(16))
+        report = self.check(3)
+        self.assertEqual(report["status"], "accepted", report["errors"])
+        self.assertEqual(len(report["silhouetteCentroidOffsetPixels"]), 2)
 
     def test_a_tampered_record_is_caught(self) -> None:
         directory = self.place(3, sprite(16))
