@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw
 
 
 CORRESPONDENCE = Path(__file__).with_name("validate_source_correspondence.py")
+TEMPORAL = Path(__file__).with_name("validate_temporal_sequence.py")
 LOCK = Path(__file__).with_name("lock_parent_foreground.py")
 ALPHA_REPAIR = Path(__file__).with_name("validate_alpha_repair.py")
 
@@ -282,6 +283,76 @@ class InteriorRgbTests(unittest.TestCase):
         self.assertEqual(report["interiorRgbMeasuredOn"], "delivered-frames")
         self.assertTrue(all(r["interiorRgbMeanAbsoluteError"] == 0.0 for r in report["frames"]))
         self.assertTrue(any("measured on delivered frames" in e for e in report["errors"]))
+
+
+class TemporalHoleTests(unittest.TestCase):
+    """A gap must not let the frames either side become neighbours."""
+
+    CONTRACT = {
+        "canvas": [CANVAS, CANVAS],
+        "statefulRegions": [],
+        "lockedRegions": [],
+        "negativeSpaceRegions": [],
+        "approvedHoldTransitions": [],
+        "approvedTemporalTransitions": [],
+        "temporalLimits": {
+            "maximumDuplicateRatio": 0.1,
+            "maximumConsecutiveHolds": 1,
+            "maximumMotionSpikeRatio": 2.0,
+            "maximumSilhouetteSpikeRatio": 1.8,
+            "maximumVisibleAreaStepRatio": 0.03,
+            "maximumBoundingBoxSizeStepPixels": 3,
+            "maximumCentroidSizeStepPixels": 2,
+            "maximumCentroidStepPixels": 2,
+            "maximumCentroidAccelerationPixels": 1.5,
+            "maximumBoundingBoxSizeAccelerationPixels": 4,
+            "maximumLoopSeamRatio": 100,
+        },
+        "tolerances": {"lockedRegionMeanAbsolute": 0.06},
+    }
+
+    def run_temporal(self, drop: int, with_manifest: bool) -> dict:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "source"
+            frames = root / "frames"
+            source_dir.mkdir()
+            frames.mkdir()
+            for index in range(1, FRAME_COUNT + 1):
+                write_sprite(source_dir / f"frame-{index:03d}.png", 10 + index, (0, 200, 0, 255))
+                if index != drop:
+                    write_sprite(frames / f"frame-{index:03d}.png", 10 + index, (80, 120, 160, 255))
+            manifest_path = root / "source-frame-manifest.json"
+            manifest_path.write_text(json.dumps(source_manifest(source_dir)))
+            contract_path = root / "contract.json"
+            contract_path.write_text(json.dumps(self.CONTRACT))
+            command = [
+                sys.executable,
+                str(TEMPORAL),
+                str(contract_path),
+                str(frames),
+                str(root / "qa"),
+                "--fps",
+                "24",
+            ]
+            if with_manifest:
+                command += ["--frame-manifest", str(manifest_path)]
+            subprocess.run(command, text=True, capture_output=True, check=False)
+            return json.loads((root / "qa" / "temporal-validation-report.json").read_text())
+
+    def test_a_hole_is_named_when_the_manifest_is_supplied(self) -> None:
+        report = self.run_temporal(drop=3, with_manifest=True)
+        self.assertEqual(report["status"], "repair-needed")
+        self.assertIn("missing output frame 3", report["errors"])
+
+    def test_transitions_are_numbered_by_frame_not_by_position(self) -> None:
+        report = self.run_temporal(drop=3, with_manifest=True)
+        transitions = {f["transition"] for f in report["geometryTransitionFailures"]}
+        self.assertNotIn("2->3", transitions, "frame 3 is absent; 2->4 is the real gap")
+
+    def test_a_complete_sequence_needs_no_hole_report(self) -> None:
+        report = self.run_temporal(drop=0, with_manifest=True)
+        self.assertFalse([e for e in report["errors"] if "missing" in e])
 
 
 if __name__ == "__main__":

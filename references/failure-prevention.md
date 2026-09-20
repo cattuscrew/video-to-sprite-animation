@@ -68,6 +68,8 @@ Final acceptance requires:
 
 Global bounds, pivot, palette, edge density, seam energy, or temporal smoothness cannot replace these checks.
 
+Pass the frame manifest to the temporal validator. Given only a directory it cannot tell a missing frame from a shorter sequence, so it closes the gap and measures the frames either side as neighbours: a batch missing two frames reports as accepted, and the smoothest possible reading comes from the sequence that was never made.
+
 ## Prevent subtle independent-redraw jitter
 
 Do not accept GPT frames from global motion energy alone. Use the contract's local silhouette-change, visible-area, bounding-box-size, centroid-step, and second-difference acceleration limits. Default motion-spike rejection is 2.0× median rather than the legacy 3.0× limit; local silhouette rejection is 1.8× median. Treat thresholds as rejection triggers, not proof of quality.

@@ -239,6 +239,14 @@ def main() -> int:
     parser.add_argument("--max-centroid-step-pixels", type=float)
     parser.add_argument("--max-centroid-acceleration-pixels", type=float)
     parser.add_argument("--max-seam-ratio", type=float)
+    parser.add_argument(
+        "--frame-manifest",
+        type=Path,
+        help=(
+            "Source or parent frame manifest. Supplying it makes a missing frame "
+            "an error instead of letting the frames either side become neighbours."
+        ),
+    )
     args = parser.parse_args()
 
     contract = json.loads(args.contract.read_text())
@@ -253,7 +261,28 @@ def main() -> int:
     max_centroid_step = args.max_centroid_step_pixels if args.max_centroid_step_pixels is not None else float(temporal.get("maximumCentroidStepPixels", 2.0))
     max_centroid_accel = args.max_centroid_acceleration_pixels if args.max_centroid_acceleration_pixels is not None else float(temporal.get("maximumCentroidAccelerationPixels", 1.5))
     max_seam_ratio = args.max_seam_ratio if args.max_seam_ratio is not None else float(temporal.get("maximumLoopSeamRatio", 3.0))
-    paths = sorted(args.frames.glob("frame-*.png"))
+    missing: list[int] = []
+    numbers: list[int] = []
+    if args.frame_manifest:
+        # With a manifest the expected set is known, so a hole is reported
+        # rather than closed. Globbing alone cannot tell a missing frame from
+        # a shorter sequence, and would make frames either side of the gap
+        # neighbours -- which reads as a smooth sequence that was never made.
+        mapping = json.loads(args.frame_manifest.read_text()).get("frameMapping", [])
+        paths = []
+        for record in mapping:
+            index = int(record["outputFrame"])
+            candidate = args.frames / str(
+                record.get("outputFile") or f"frame-{index:03d}.png"
+            )
+            if candidate.is_file():
+                paths.append(candidate)
+                numbers.append(index)
+            else:
+                missing.append(index)
+    else:
+        paths = sorted(args.frames.glob("frame-*.png"))
+        numbers = list(range(1, len(paths) + 1))
     if len(paths) < 2:
         raise SystemExit("Need at least two PNG frames")
     images = [np.asarray(Image.open(path).convert("RGBA")) for path in paths]
@@ -326,14 +355,14 @@ def main() -> int:
         failure = pair_geometry_failure(
             silhouettes[index],
             silhouettes[index + 1],
-            (index + 1, index + 2),
+            (numbers[index], numbers[index + 1]),
             limits,
             approved,
             median_silhouette,
         )
         if failure:
             geometry_failures.append(failure)
-            flagged_frames.update((index + 1, index + 2))
+            flagged_frames.update((numbers[index], numbers[index + 1]))
 
     acceleration_failures = []
     for index in range(1, len(images) - 1):
@@ -341,13 +370,13 @@ def main() -> int:
             silhouettes[index - 1],
             silhouettes[index],
             silhouettes[index + 1],
-            (index, index + 1, index + 2),
+            (numbers[index - 1], numbers[index], numbers[index + 1]),
             limits,
             approved,
         )
         if failure:
             acceleration_failures.append(failure)
-            flagged_frames.add(index + 1)
+            flagged_frames.add(numbers[index])
     seam_ratio = energies[-1] / median_motion if median_motion else (0.0 if energies[-1] == 0 else float("inf"))
 
     locked_failures = []
@@ -387,7 +416,7 @@ def main() -> int:
             if delta > limit:
                 state_failures.append({"region": region["name"], "frame": index, "nearestDelta": delta})
 
-    errors = []
+    errors = [f"missing output frame {number}" for number in missing]
     if duplicate_ratio > max_duplicate_ratio:
         errors.append(f"duplicate ratio {duplicate_ratio:.3f} exceeds {max_duplicate_ratio:.3f}")
     if longest_hold_run > max_consecutive_holds:
