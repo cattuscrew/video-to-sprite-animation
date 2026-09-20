@@ -16,6 +16,11 @@ def main() -> None:
     parser.add_argument("--first-native-frame", type=int, required=True)
     parser.add_argument("--source-fps", type=float, required=True)
     parser.add_argument("--output-fps", type=float, required=True)
+    parser.add_argument(
+        "--loop-type",
+        choices=("natural-loop", "ping-pong-loop", "one-shot"),
+        default="natural-loop",
+    )
     parser.add_argument("--canvas", default="720,720")
     parser.add_argument("--offset", default="0,0")
     args = parser.parse_args()
@@ -58,6 +63,7 @@ def main() -> None:
     manifest = {
         "version": 3,
         "frameConstruction": "one-to-one-source",
+        "loopType": args.loop_type,
         "mappingRole": "selected-source-frame-authority",
         "processingType": "one-to-one-source-processing",
         "backgroundRemovalTool": "GPT Image",

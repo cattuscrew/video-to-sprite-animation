@@ -26,6 +26,10 @@ import sys
 import time
 from pathlib import Path
 
+# The worker owns the model defaults; a second copy here would go stale the
+# first time one of them changes.
+from run_frame_worker import DEFAULT_EFFORT, DEFAULT_MODEL, validate_settings
+
 ACCEPTED = "accepted"
 REPAIR_NEEDED = "repair-needed"
 BLOCKED = "user-visible-blocked"
@@ -37,10 +41,19 @@ USAGE_LIMIT = "usage_limit_reached"
 WORKER_DIED = "worker_died"
 TOOL_ERROR = "tool_error"
 
-# Measured over 120 attempts: 25% accepted, so a frame needs about four tries.
-# At 4 and 2 a third of a batch blocked on the quality budget with nothing
-# wrong with the frames.
-DEFAULT_BUDGETS = {"safetyBlock": 6, "quality": 6}
+# Quality failures are counted by kind, because the two kinds have nothing to
+# do with each other. Geometry is the tool returning a re-illustrated frame;
+# colour is it repainting one. They need different fixes, and a run-status that
+# says only "quality" cannot tell you which one blocked a frame.
+GEOMETRY = "geometry"
+COLOUR = "colour"
+
+# Measured over the 167 real calls of the 2026-09-20 run: 25% accepted, so a
+# frame needs about four tries. At 4 and 2 a third of a batch blocked on the
+# quality budget with nothing wrong with the frames. Both kinds keep the same
+# limit the single counter had: the split is here to make a block legible, and
+# there is no measurement yet that would justify a different number for colour.
+DEFAULT_BUDGETS = {"safetyBlock": 6, "qualityGeometry": 6, "qualityColour": 6}
 
 
 def sha256(path: Path) -> str:
@@ -88,8 +101,34 @@ def budgets(run: Path) -> dict[str, int]:
     if authority.is_file():
         approved = read_json(authority).get("approvalScope", {}).get("retryBudgets")
         if isinstance(approved, dict):
-            return {**DEFAULT_BUDGETS, **{k: int(v) for k, v in approved.items()}}
+            limits = {**DEFAULT_BUDGETS, **{k: int(v) for k, v in approved.items()}}
+            # A manifest approved before the split names one "quality" budget.
+            # Honour it as the limit for both kinds rather than silently
+            # handing that run the larger default.
+            if "quality" in approved:
+                shared = int(approved["quality"])
+                limits["qualityGeometry"] = shared
+                limits["qualityColour"] = shared
+                limits.pop("quality", None)
+            return limits
     return dict(DEFAULT_BUDGETS)
+
+
+def quality_kinds(record: dict) -> list[str]:
+    """Which quality budgets one attempt draws on.
+
+    An attempt that both warped and repainted charges both: it failed in two
+    unrelated ways and hiding one of them behind the other is how a colour
+    problem stays invisible for a whole batch. A record written before the
+    split names no kind, and geometry is the honest default -- it is what
+    almost every one of them was.
+    """
+    if record.get("errorClass") != QUALITY:
+        return []
+    kinds = record.get("qualityKinds")
+    if isinstance(kinds, list) and kinds:
+        return [k for k in kinds if k in (GEOMETRY, COLOUR)]
+    return [GEOMETRY]
 
 
 def spent(records: list[dict]) -> dict[str, int]:
@@ -100,7 +139,8 @@ def spent(records: list[dict]) -> dict[str, int]:
         "safetyBlock": sum(
             1 for r in records if r.get("errorClass") in (MODERATION, TOOL_ERROR)
         ),
-        "quality": sum(1 for r in records if r.get("errorClass") == QUALITY),
+        "qualityGeometry": sum(1 for r in records if GEOMETRY in quality_kinds(r)),
+        "qualityColour": sum(1 for r in records if COLOUR in quality_kinds(r)),
     }
 
 
@@ -223,7 +263,7 @@ def pending_frames(run: Path, limits: dict[str, int]) -> tuple[list[dict], list[
             "nextAttempt": len(records) + 1,
             "job": str(job_path),
         }
-        over = [k for k in ("safetyBlock", "quality") if used[k] >= limits[k]]
+        over = [k for k in limits if used.get(k, 0) >= limits[k]]
         if over:
             item["exhausted"] = over
             exhausted.append(item)
@@ -345,7 +385,14 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
     for entry in frames:
         if entry["status"] == BLOCKED:
-            errors.append(f"frame {entry['outputFrame']}: retry budget exhausted")
+            # Name the budget that ran out. "Retry budget exhausted" alone sent
+            # someone to read 6 attempt records to find out whether the tool
+            # kept warping the frame or kept repainting it.
+            over = [k for k in limits if entry["spent"].get(k, 0) >= limits[k]]
+            errors.append(
+                f"frame {entry['outputFrame']}: retry budget exhausted "
+                f"({', '.join(over)})"
+            )
 
     accepted = sum(1 for f in frames if f["status"] == ACCEPTED)
     if paused and paused > time.time():
@@ -365,6 +412,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         "blockedFrameCount": sum(1 for f in frames if f["status"] == BLOCKED),
         "pendingFrameCount": sum(1 for f in frames if f["status"] == REPAIR_NEEDED),
         "budgets": limits,
+        "spentTotals": {
+            key: sum(f["spent"].get(key, 0) for f in frames) for key in limits
+        },
         "errors": errors,
         "frames": frames,
     }
@@ -393,6 +443,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     run-status.json when it finishes rather than carrying the whole batch
     through its own context.
     """
+    problems = validate_settings(args.model, args.reasoning_effort, args.fast)
+    if problems:
+        # Before the loop: a setting the catalog rejects kills every worker in
+        # turn, and a run that dies one frame at a time looks like a bad batch
+        # rather than a bad flag.
+        raise SystemExit("; ".join(problems))
     limits = budgets(args.run)
     python = args.python or sys.executable
     here = Path(__file__).resolve().parent
@@ -431,8 +487,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         processed += 1
 
         if use_worker:
+            command = [python, str(use_worker), str(args.run), str(frame), str(attempt)]
+            command += ["--model", args.model, "--reasoning-effort", args.reasoning_effort]
+            if args.fast:
+                command.append("--fast")
             worker = subprocess.run(
-                [python, str(use_worker), str(args.run), str(frame), str(attempt)],
+                command,
                 capture_output=True,
                 text=True,
             )
@@ -490,6 +550,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                     "attempt": attempt,
                     "status": REPAIR_NEEDED,
                     "errorClass": QUALITY,
+                    "qualityKinds": [GEOMETRY],
                     "errorText": "registration rejected the frame",
                 }
             )
@@ -516,13 +577,22 @@ def cmd_run(args: argparse.Namespace) -> int:
             record_path = directory / "record.json"
             record = read_json(record_path) if record_path.is_file() else {}
             detail = directory / "check-attempt.json"
-            reasons = read_json(detail).get("errors", []) if detail.is_file() else []
+            found = read_json(detail) if detail.is_file() else {}
+            reasons = found.get("errors", [])
+            # check_frame_attempt separates the appearance gates from the rest.
+            # An attempt that both warped and repainted charges both budgets:
+            # it failed twice, for unrelated reasons.
+            colour = found.get("colourErrors") or []
+            kinds = ([COLOUR] if colour else []) + (
+                [GEOMETRY] if len(reasons) > len(colour) or not colour else []
+            )
             record.update(
                 {
                     "outputFrame": frame,
                     "attempt": attempt,
                     "status": REPAIR_NEEDED,
                     "errorClass": QUALITY,
+                    "qualityKinds": kinds,
                     "errorText": "; ".join(reasons) or "attempt check failed",
                 }
             )
@@ -578,6 +648,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="script that produces attempt raw.png; --worker none to pre-stage it",
     )
     run.add_argument("--python", help="interpreter for the numpy/Pillow scripts")
+    run.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help="model every worker runs on, rather than whatever config.toml holds",
+    )
+    run.add_argument(
+        "--reasoning-effort",
+        default=DEFAULT_EFFORT,
+        help="reasoning effort every worker runs on",
+    )
+    run.add_argument(
+        "--fast",
+        action="store_true",
+        help="Fast mode: the priority service tier, 1.5x speed and faster usage burn",
+    )
     run.add_argument("--max-attempts", type=int, default=0)
     run.set_defaults(func=cmd_run)
     return parser

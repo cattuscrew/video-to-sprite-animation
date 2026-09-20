@@ -120,22 +120,70 @@ class BudgetTests(unittest.TestCase):
 
     def test_budgets_are_counted_separately(self) -> None:
         safety = frame_jobs.DEFAULT_BUDGETS["safetyBlock"]
-        quality = frame_jobs.DEFAULT_BUDGETS["quality"]
+        geometry = frame_jobs.DEFAULT_BUDGETS["qualityGeometry"]
         for attempt in range(1, safety + 1):
             record_attempt(self.run, 1, attempt, error_class=frame_jobs.MODERATION)
-        for attempt in range(1, quality + 1):
-            record_attempt(self.run, 2, attempt, error_class=frame_jobs.QUALITY)
+        for attempt in range(1, geometry + 1):
+            record_attempt(
+                self.run,
+                2,
+                attempt,
+                error_class=frame_jobs.QUALITY,
+                qualityKinds=[frame_jobs.GEOMETRY],
+            )
         ready = self.ready_frames()
         self.assertNotIn(1, ready, "spending the safety budget should exhaust it")
-        self.assertNotIn(2, ready, "spending the quality budget should exhaust it")
+        self.assertNotIn(2, ready, "spending the geometry budget should exhaust it")
         self.assertIn(3, ready)
+
+    def test_warping_and_repainting_draw_on_different_budgets(self) -> None:
+        """The two quality failures are unrelated, so a frame that keeps
+        warping must not use up the budget for a frame that keeps repainting."""
+        geometry = frame_jobs.DEFAULT_BUDGETS["qualityGeometry"]
+        for attempt in range(1, geometry + 1):
+            record_attempt(
+                self.run,
+                1,
+                attempt,
+                error_class=frame_jobs.QUALITY,
+                qualityKinds=[frame_jobs.GEOMETRY],
+            )
+        result = json.loads(run_cli("next", str(self.run)).stdout)
+        exhausted = next(i for i in result["exhausted"] if i["outputFrame"] == 1)
+        self.assertEqual(exhausted["exhausted"], ["qualityGeometry"])
+        self.assertEqual(exhausted["spent"]["qualityColour"], 0)
+
+    def test_an_attempt_that_failed_both_ways_charges_both(self) -> None:
+        record_attempt(
+            self.run,
+            1,
+            1,
+            error_class=frame_jobs.QUALITY,
+            qualityKinds=[frame_jobs.COLOUR, frame_jobs.GEOMETRY],
+        )
+        result = json.loads(run_cli("next", str(self.run)).stdout)
+        first = next(i for i in result["ready"] if i["outputFrame"] == 1)
+        self.assertEqual(first["spent"]["qualityGeometry"], 1)
+        self.assertEqual(first["spent"]["qualityColour"], 1)
+
+    def test_a_record_from_before_the_split_counts_as_geometry(self) -> None:
+        """Almost every one of them was, and guessing colour would block a
+        resumed run on a budget nothing had actually spent."""
+        record_attempt(self.run, 1, 1, error_class=frame_jobs.QUALITY)
+        result = json.loads(run_cli("next", str(self.run)).stdout)
+        first = next(i for i in result["ready"] if i["outputFrame"] == 1)
+        self.assertEqual(first["spent"]["qualityGeometry"], 1)
+        self.assertEqual(first["spent"]["qualityColour"], 0)
 
     def test_safety_blocks_do_not_spend_the_quality_budget(self) -> None:
         for attempt in range(1, 4):
             record_attempt(self.run, 1, attempt, error_class=frame_jobs.MODERATION)
         result = json.loads(run_cli("next", str(self.run)).stdout)
         first = next(i for i in result["ready"] if i["outputFrame"] == 1)
-        self.assertEqual(first["spent"], {"safetyBlock": 3, "quality": 0})
+        self.assertEqual(
+            first["spent"],
+            {"safetyBlock": 3, "qualityGeometry": 0, "qualityColour": 0},
+        )
 
     def test_usage_limit_pauses_without_spending_a_budget(self) -> None:
         import time
@@ -150,7 +198,10 @@ class BudgetTests(unittest.TestCase):
         result = json.loads(run_cli("next", str(self.run)).stdout)
         self.assertIn("pausedUntil", result)
         first = next(i for i in result["ready"] if i["outputFrame"] == 1)
-        self.assertEqual(first["spent"], {"safetyBlock": 0, "quality": 0})
+        self.assertEqual(
+            first["spent"],
+            {"safetyBlock": 0, "qualityGeometry": 0, "qualityColour": 0},
+        )
 
     def test_a_worker_that_died_spends_no_budget(self) -> None:
         for attempt in range(1, 6):
@@ -159,9 +210,28 @@ class BudgetTests(unittest.TestCase):
 
     def test_approved_budgets_override_the_defaults(self) -> None:
         (self.run / "authority-manifest.json").write_text(
-            json.dumps({"approvalScope": {"retryBudgets": {"safetyBlock": 1, "quality": 1}}})
+            json.dumps({"approvalScope": {"retryBudgets": {"safetyBlock": 1}}})
         )
         record_attempt(self.run, 1, 1, error_class=frame_jobs.MODERATION)
+        self.assertNotIn(1, self.ready_frames())
+
+    def test_a_manifest_approved_before_the_split_still_binds_both_kinds(self) -> None:
+        """It named one quality budget. Honour it as the limit for each kind
+        rather than handing a resumed run the larger new default."""
+        (self.run / "authority-manifest.json").write_text(
+            json.dumps({"approvalScope": {"retryBudgets": {"quality": 1}}})
+        )
+        record_attempt(
+            self.run,
+            1,
+            1,
+            error_class=frame_jobs.QUALITY,
+            qualityKinds=[frame_jobs.COLOUR],
+        )
+        limits = frame_jobs.budgets(self.run)
+        self.assertEqual(limits["qualityColour"], 1)
+        self.assertEqual(limits["qualityGeometry"], 1)
+        self.assertNotIn("quality", limits)
         self.assertNotIn(1, self.ready_frames())
 
 
@@ -190,6 +260,30 @@ class WorkerConfigurationTests(unittest.TestCase):
         parser = module.build_parser()
         args = parser.parse_args(["run", str(self.run)])
         self.assertEqual(Path(args.worker).name, "run_frame_worker.py")
+
+    def test_model_settings_reach_the_worker(self) -> None:
+        """Pinned settings are useless if the driver keeps them to itself."""
+        fake = self.root / "fake_worker.py"
+        fake.write_text(
+            "import json, sys, pathlib\n"
+            f"pathlib.Path({str(self.root / 'argv.json')!r}).write_text(json.dumps(sys.argv))\n"
+            "raise SystemExit(1)\n"
+        )
+        run_cli("run", str(self.run), "--worker", str(fake), "--fast", "--max-attempts", "1")
+        argv = json.loads((self.root / "argv.json").read_text())
+        self.assertIn("--fast", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], frame_jobs.DEFAULT_MODEL)
+        self.assertEqual(
+            argv[argv.index("--reasoning-effort") + 1], frame_jobs.DEFAULT_EFFORT
+        )
+
+    def test_fast_mode_is_off_unless_asked_for(self) -> None:
+        import frame_jobs as module
+
+        args = module.build_parser().parse_args(["run", str(self.run)])
+        self.assertFalse(args.fast)
+        self.assertEqual(args.model, module.DEFAULT_MODEL)
+        self.assertEqual(args.reasoning_effort, module.DEFAULT_EFFORT)
 
 
 class StatusTests(unittest.TestCase):

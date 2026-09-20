@@ -10,11 +10,18 @@ import unittest
 from pathlib import Path
 
 from run_frame_worker import (
+    DEFAULT_EFFORT,
+    DEFAULT_MODEL,
+    FAST_TIER,
     MODERATION,
+    STANDARD_TIER,
     TOOL_ERROR,
     USAGE_LIMIT,
     WORKER_DIED,
     build_brief,
+    build_command,
+    validate_settings,
+    choose_prompt,
     classify,
     parse_events,
     resets_at,
@@ -216,5 +223,101 @@ class BriefTests(unittest.TestCase):
             self.assertIn(rule, text)
 
 
+class CommandTests(unittest.TestCase):
+    """The model settings are pinned, not inherited from config.toml."""
+
+    def command(self, **kwargs) -> list[str]:
+        defaults = {
+            "codex": "codex",
+            "run": Path("/tmp/run"),
+            "brief": "brief",
+            "model": DEFAULT_MODEL,
+            "effort": DEFAULT_EFFORT,
+            "tier": STANDARD_TIER,
+        }
+        return build_command(**{**defaults, **kwargs})
+
+    def test_model_and_effort_are_passed_rather_than_inherited(self) -> None:
+        command = self.command()
+        self.assertEqual(command[command.index("-m") + 1], DEFAULT_MODEL)
+        self.assertIn(f'model_reasoning_effort="{DEFAULT_EFFORT}"', command)
+
+    def test_standard_and_fast_select_their_service_tiers(self) -> None:
+        self.assertIn(f'service_tier="{STANDARD_TIER}"', self.command())
+        self.assertIn(f'service_tier="{FAST_TIER}"', self.command(tier=FAST_TIER))
+
+    def test_the_brief_stays_last_and_the_sandbox_stays_read_only(self) -> None:
+        command = self.command(brief="the brief")
+        self.assertEqual(command[-1], "the brief")
+        self.assertEqual(command[command.index("-s") + 1], "read-only")
+
+
+class SettingValidationTests(unittest.TestCase):
+    """A typo must stop the run, not quietly change what generated it."""
+
+    def catalog(self) -> Path:
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        json.dump(
+            {
+                "models": [
+                    {
+                        "slug": DEFAULT_MODEL,
+                        "supported_reasoning_levels": [
+                            {"effort": "low"},
+                            {"effort": "medium"},
+                        ],
+                        "service_tiers": [{"id": FAST_TIER}],
+                    },
+                    {"slug": "gpt-no-fast", "service_tiers": []},
+                ]
+            },
+            handle,
+        )
+        handle.close()
+        return Path(handle.name)
+
+    def test_approved_settings_pass(self) -> None:
+        self.assertEqual(
+            validate_settings(DEFAULT_MODEL, DEFAULT_EFFORT, False, self.catalog()), []
+        )
+
+    def test_an_unknown_model_is_named(self) -> None:
+        problems = validate_settings("gpt-5.6-sool", DEFAULT_EFFORT, False, self.catalog())
+        self.assertIn("unknown model", problems[0])
+
+    def test_an_effort_the_model_lacks_is_rejected(self) -> None:
+        problems = validate_settings(DEFAULT_MODEL, "turbo", False, self.catalog())
+        self.assertIn("reasoning effort", problems[0])
+
+    def test_fast_is_rejected_where_the_tier_does_not_exist(self) -> None:
+        problems = validate_settings("gpt-no-fast", DEFAULT_EFFORT, True, self.catalog())
+        self.assertIn("Fast mode is unavailable", problems[0])
+
+    def test_a_missing_catalog_blocks_nothing(self) -> None:
+        """It is a cache. An absent one must not stop a run from starting."""
+        self.assertEqual(
+            validate_settings("anything", "anything", True, Path("/nonexistent.json")), []
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChoosePromptTests(unittest.TestCase):
+    def test_short_prompt_is_used_from_the_first_attempt(self) -> None:
+        """It is the better prompt, not a moderation rescue, so nothing is
+        gained by spending the long prompt's worse odds on attempt one."""
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / "prompt.txt").write_text("long")
+            (run / "prompt-short.txt").write_text("short")
+            self.assertEqual(choose_prompt(run).name, "prompt-short.txt")
+
+    def test_long_prompt_is_used_when_no_short_one_was_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / "prompt.txt").write_text("long")
+            self.assertEqual(choose_prompt(run).name, "prompt.txt")

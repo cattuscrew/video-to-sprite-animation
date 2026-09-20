@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Rank natural and ping-pong loop candidates from native-FPS source frames."""
+"""Rank loop candidates, or one-shot segment boundaries, from native frames.
+
+Two modes, because two different questions get asked of a clip.
+
+`loop` ranks a window that can repeat: it wants the seam invisible, so it
+scores how well the last frame leads back into the first.
+
+`one-shot` ranks an action that plays once -- an attack, a death, a cast. There
+is no seam to hide. What matters is that the segment starts where the character
+leaves rest and ends where it settles back, so the scoring looks for the rise
+and fall of motion instead. Asking the loop scorer for this returns the
+quietest window in the clip, which is the part where nothing happens.
+"""
 
 from __future__ import annotations
 
@@ -42,20 +54,135 @@ def distance(a: np.ndarray, b: np.ndarray, edge_a: np.ndarray, edge_b: np.ndarra
     return appearance * 0.7 + outline * 0.3
 
 
+def segment_candidates(
+    steps: list[float], fps: int, source_start: float, ramp: int
+) -> dict:
+    """Where the action leaves rest, and where it settles back.
+
+    `steps[i]` is how much frame i moves into frame i+1, so a run of small
+    values is the character holding still. Rest is taken as the 20th percentile
+    of the clip's own motion rather than an absolute: a restrained idle and a
+    sword swing have nothing in common on an absolute scale, and the thing
+    being located is the change relative to this clip.
+    """
+    rest = float(np.percentile(steps, 20))
+    peak = float(np.percentile(steps, 95))
+    span = max(peak - rest, 1e-6)
+
+    starts, ends = [], []
+    for index in range(len(steps)):
+        before = steps[max(0, index - ramp) : index]
+        after = steps[index : index + ramp]
+        if not before or not after:
+            continue
+        quiet_before = float(np.mean(before))
+        moving_after = float(np.mean(after))
+        # A start wants quiet behind it and motion ahead; an end is the same
+        # shape reversed. Normalised by the clip's own span so the two scores
+        # are comparable and a threshold means something across clips.
+        starts.append(
+            {
+                "frameOffset": index,
+                "seconds": source_start + index / fps,
+                "score": (moving_after - quiet_before) / span,
+                "restBefore": quiet_before,
+                "motionAfter": moving_after,
+            }
+        )
+        ends.append(
+            {
+                "frameOffset": index + 1,
+                "seconds": source_start + (index + 1) / fps,
+                "score": (quiet_before - moving_after) / span,
+                "motionBefore": quiet_before,
+                "restAfter": moving_after,
+            }
+        )
+    starts.sort(key=lambda item: -float(item["score"]))
+    ends.sort(key=lambda item: -float(item["score"]))
+
+    best_start = starts[0] if starts else None
+    # The settle must come after the onset, or the "segment" runs backwards.
+    after_start = [
+        item
+        for item in ends
+        if best_start and int(item["frameOffset"]) > int(best_start["frameOffset"]) + 1
+    ]
+    best_end = after_start[0] if after_start else (ends[0] if ends else None)
+    segment = None
+    if best_start and best_end:
+        first = int(best_start["frameOffset"])
+        last = int(best_end["frameOffset"])
+        segment = {
+            "startFrameOffset": first,
+            "endFrameOffsetInclusive": last,
+            "frameCount": last - first + 1,
+            "startSeconds": source_start + first / fps,
+            "endSecondsInclusive": source_start + last / fps,
+            "motionEnergy": float(np.mean(steps[first:last] or [0.0])),
+        }
+    return {
+        "restLevel": rest,
+        "peakLevel": peak,
+        "bestSegment": segment,
+        "topStarts": starts[:10],
+        "topSettles": ends[:10],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("frames", type=Path, help="Native-FPS frame directory")
     parser.add_argument("output", type=Path, help="Ranking JSON path")
     parser.add_argument("--source-start", type=float, required=True)
     parser.add_argument("--fps", type=int, required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("loop", "one-shot"),
+        default="loop",
+        help="loop ranks repeatable windows; one-shot ranks onset/settle boundaries",
+    )
     parser.add_argument("--window-frames", type=int, help="Defaults to one second")
     parser.add_argument("--half-cycle-frames", type=int, help="Defaults to half a second")
+    parser.add_argument(
+        "--ramp-frames",
+        type=int,
+        help="One-shot: frames either side used to judge rest vs motion "
+        "(defaults to a sixth of a second)",
+    )
     parser.add_argument("--crop", type=parse_crop)
     args = parser.parse_args()
 
     paths = sorted(args.frames.glob("frame-*.png"))
     window = args.window_frames or args.fps
     half_cycle = args.half_cycle_frames or args.fps // 2
+
+    if args.mode == "one-shot":
+        ramp = args.ramp_frames or max(2, args.fps // 6)
+        if len(paths) < ramp * 2 + 1:
+            raise SystemExit(
+                f"Need at least {ramp * 2 + 1} frames to judge onset and settle; "
+                f"lower --ramp-frames or widen the search range"
+            )
+        frames = [load_frame(path, args.crop) for path in paths]
+        edges = [edge_map(frame) for frame in frames]
+        steps = [
+            distance(frames[i], frames[i + 1], edges[i], edges[i + 1])
+            for i in range(len(frames) - 1)
+        ]
+        result = {
+            "mode": "one-shot",
+            "sourceStart": args.source_start,
+            "fps": args.fps,
+            "rampFrames": ramp,
+            "crop": args.crop,
+            **segment_candidates(steps, args.fps, args.source_start, ramp),
+        }
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(result, indent=2) + "\n")
+        print(json.dumps(result, indent=2))
+        return
+
     if len(paths) < window + 1:
         raise SystemExit(f"Need at least {window + 1} frames for natural-loop scoring")
     if half_cycle < 2 or len(paths) <= half_cycle:
@@ -115,6 +242,7 @@ def main() -> None:
     ping_pong.sort(key=lambda item: float(item["score"]))
 
     result = {
+        "mode": "loop",
         "sourceStart": args.source_start,
         "fps": args.fps,
         "windowFrames": window,
