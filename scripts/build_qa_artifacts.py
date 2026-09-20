@@ -65,16 +65,33 @@ def on_checker(path: Path) -> Image.Image:
     return board.convert("RGB")
 
 
-def write_gif(paths: list[Path], output: Path, fps: float) -> None:
-    frames = [on_checker(path) for path in paths]
+def write_gif(
+    paths: list[Path],
+    output: Path,
+    fps: float,
+    loops: bool = True,
+    background: str = "checker",
+) -> None:
+    """`loops=False` writes a GIF that plays once and holds its last frame.
+
+    A one-shot looped back to its first frame reads as a stutter that the
+    sprites do not have, and reviewing playback on it reviews the preview.
+
+    `background="black"` for a preview meant for watching motion: a sprite
+    moving over a static checkerboard is hard to read, and black is what the
+    exact-FPS MP4 uses, so both previews show an edge the same way.
+    """
+    render = on_black if background == "black" else on_checker
+    frames = [render(path) for path in paths]
     output.parent.mkdir(parents=True, exist_ok=True)
+    options = {"loop": 0} if loops else {}
     frames[0].save(
         output,
         save_all=True,
         append_images=frames[1:],
         duration=max(1, int(round(1000.0 / fps))),
-        loop=0,
         disposal=2,
+        **options,
     )
 
 
@@ -286,6 +303,12 @@ def main() -> int:
     parser.add_argument("frames", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--fps", type=float, required=True)
+    parser.add_argument(
+        "--loop-type",
+        choices=("natural-loop", "ping-pong-loop", "one-shot"),
+        default="natural-loop",
+        help="one-shot previews play once instead of looping",
+    )
     parser.add_argument("--slow-factor", type=float, default=4.0)
     parser.add_argument("--temporal-report", type=Path)
     parser.add_argument("--source-pairs", type=int, default=12)
@@ -338,17 +361,25 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     exact_gif = args.output / "preview-exact-fps.gif"
     slow_gif = args.output / "preview-slow.gif"
-    write_gif(paths, exact_gif, args.fps)
-    write_gif(paths, slow_gif, max(1.0, args.fps / args.slow_factor))
+    loops = args.loop_type != "one-shot"
+    write_gif(paths, exact_gif, args.fps, loops)
+    write_gif(
+        paths,
+        slow_gif,
+        max(1.0, args.fps / args.slow_factor),
+        loops,
+        background="black",
+    )
     # GIF frame delays are whole centiseconds, so 24fps becomes 25 and the
-    # "exact FPS" preview is not exact. Prefer MP4 for both when ffmpeg exists.
+    # "exact FPS" preview would not be exact. That preview is the one timing is
+    # judged on, so it stays MP4 when ffmpeg exists.
     exact = exact_gif
     if write_mp4(paths, args.output / "preview-exact-fps.mp4", args.fps):
         exact = args.output / "preview-exact-fps.mp4"
+    # The slow preview is for looking at motion, not timing, so the
+    # centisecond rounding costs nothing and a GIF loops by itself in any
+    # viewer. An MP4 of it has to be opened, played and replayed by hand.
     slow = slow_gif
-    slow_fps = max(1.0, args.fps / args.slow_factor)
-    if write_mp4(paths, args.output / "preview-slow.mp4", slow_fps):
-        slow = args.output / "preview-slow.mp4"
 
     onion = args.output / "alpha-onion-sheet.png"
     onion_sheet(paths, onion)
