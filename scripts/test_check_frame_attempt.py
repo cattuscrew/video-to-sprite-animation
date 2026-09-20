@@ -138,7 +138,7 @@ class AttemptCheckTests(unittest.TestCase):
         opaque = tinted[:, :, 3] > 250
         tinted[:, :, 2][opaque] = np.clip(
             tinted[:, :, 2][opaque].astype(int) + 40, 0, 255
-        ).astype(np.uint8)
+        ).astype(np.uint8)  # well past the 12-level limit
         self.place(3, tinted)
         report = self.check(3)
         self.assertEqual(report["status"], "repair-needed")

@@ -61,14 +61,23 @@ from validate_temporal_sequence import (
 
 DEFAULT_DRIFT_RADIUS = 0.35  # px; observed post-registration max was 0.074
 
-# Measured across the 48 delivered frames against their own native sources.
-# Mean absolute error runs 9-11.5 levels, almost all of it local disagreement
-# where an internal outline lands half a pixel differently after resampling.
-# Signed per-channel bias over the same pixels never exceeded 3.8, so a tint
-# shift shows up in the bias long before it shows up in the mean -- which is
-# why both are measured and the bias limit is the tight one.
+# Mean absolute error runs 7.8-11.5 levels on real output, almost all of it
+# local disagreement where an internal outline lands half a pixel differently
+# after resampling.
 MAX_INTERIOR_RGB_ERROR = 20.0
-MAX_CHANNEL_BIAS = 8.0
+
+# Raw one-to-one output carries a systematic shift against its native frame --
+# every channel negative, worst observed 8.1 across six attempts. An earlier
+# limit of 8 was calibrated on frames whose interior RGB had been restored from
+# an approved parent, so it had never seen unrestored output and rejected an
+# otherwise good frame.
+#
+# The limit is absolute, by the user's decision on 2026-09-20, having been
+# shown the alternative: gating each frame's distance from an approved target
+# bias would catch a frame that differs from the rest while still allowing the
+# systematic shift. As set, a frame sitting 11 levels off on one channel passes
+# unremarked. It catches gross recolouring, not drift.
+MAX_CHANNEL_BIAS = 12.0
 # The artwork's black keyline. Output ran 10.5% of the interior against the
 # source's 8.2%, never differing by more than 3.3 points.
 MAX_OUTLINE_FRACTION_DELTA = 0.06
