@@ -5,8 +5,9 @@ Three things are checked here that nothing else can check:
 
 Identity. An output is claimed to be frame N. At 24 fps neighbouring frames
 differ so little that frame N's output can sit inside every per-frame limit
-against parent N-1 as well, so "it matches its parent" is not evidence it is
-the right frame. It must match its own parent better than either neighbour's.
+against native frame N-1 as well, so "it matches its source" is not evidence it
+is the right frame. It must match its own source better than either
+neighbour's.
 
 Drift, against a fixed target rather than against whatever landed nearby.
 A neighbour-relative check depends on arrival order and cannot be re-run
@@ -37,6 +38,7 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
+from source_foreground import foreground_mask
 from validate_temporal_sequence import (
     pair_geometry_failure,
     silhouette_metrics,
@@ -62,8 +64,12 @@ def centroid(mask: np.ndarray) -> np.ndarray:
 
 
 def alpha_disagreement(first: np.ndarray, second: np.ndarray) -> float:
-    """Fraction of the union silhouette the two images disagree about."""
-    a, b = first[:, :, 3] > 18, second[:, :, 3] > 18
+    """Fraction of the union silhouette the two images disagree about.
+
+    The authority is a native frame with no alpha, so its silhouette comes from
+    the chroma test rather than a channel that is opaque everywhere.
+    """
+    a, b = foreground_mask(first), foreground_mask(second)
     union = np.logical_or(a, b).sum()
     return float(np.logical_xor(a, b).sum() / max(1, union))
 
@@ -175,12 +181,11 @@ def main() -> int:
         errors.append("attempt reports success but names no image item id")
 
     authority_path = Path(job["authority"])
-    for label, digest_key in (("authority", "parentSha256"), ("source", "sourceSha256")):
-        expected = job.get(digest_key)
-        candidate = job.get("parentFile" if label == "authority" else "sourceFile")
-        if expected and candidate and Path(candidate).is_file():
-            if sha256(Path(candidate)) != expected:
-                errors.append(f"{label} frame no longer matches the SHA-256 the job froze")
+    expected = job.get("sourceSha256")
+    candidate = job.get("sourceFile")
+    if expected and candidate and Path(candidate).is_file():
+        if sha256(Path(candidate)) != expected:
+            errors.append("source frame no longer matches the SHA-256 the job froze")
 
     output = rgba(image_path)
     authority = rgba(authority_path)
@@ -202,7 +207,7 @@ def main() -> int:
     # Order-independent drift: measured against this frame's own authority and
     # compared with a fixed approved target, never with whatever landed nearby.
     target = np.array(args.drift_target if args.drift_target else (0.0, 0.0))
-    drift = centroid(output[:, :, 3] > 18) - centroid(authority[:, :, 3] > 18)
+    drift = centroid(foreground_mask(output)) - centroid(foreground_mask(authority))
     deviation = float(np.linalg.norm(drift - target))
     check["driftPixels"] = [round(float(drift[0]), 4), round(float(drift[1]), 4)]
     check["driftTargetPixels"] = [round(float(target[0]), 4), round(float(target[1]), 4)]
