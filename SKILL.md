@@ -87,4 +87,4 @@ Warping a master, transferring centroid/landmark/flow motion, generating new pos
 
 ## Deliverable summary
 
-Report the output directory, frame count, FPS/order, exact selected native-frame list, source range, background tool, one-to-one classification, correspondence status, pivot/root deviation, topology and fragile-region results, repairs, blocked frames, and final delivery-gate status.
+Open the report with two lines: the absolute output directory, and the path to the exact-FPS MP4 inside it. Those are the two things wanted first, every time; do not bury them in prose further down. Then report frame count, FPS/order, exact selected native-frame list, source range, background tool, one-to-one classification, correspondence status, pivot/root deviation, topology and fragile-region results, repairs, blocked frames, and final delivery-gate status.
