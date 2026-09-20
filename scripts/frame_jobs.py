@@ -452,6 +452,38 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             continue
 
+        check = subprocess.run(
+            [
+                python,
+                str(here / "check_frame_attempt.py"),
+                str(args.run),
+                str(frame),
+                str(attempt),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if check.returncode != 0:
+            record_path = directory / "record.json"
+            record = read_json(record_path) if record_path.is_file() else {}
+            detail = directory / "check-attempt.json"
+            reasons = read_json(detail).get("errors", []) if detail.is_file() else []
+            record.update(
+                {
+                    "outputFrame": frame,
+                    "attempt": attempt,
+                    "status": REPAIR_NEEDED,
+                    "errorClass": QUALITY,
+                    "errorText": "; ".join(reasons) or "attempt check failed",
+                }
+            )
+            write_json(record_path, record)
+            print(
+                f"frame {frame:>3} attempt {attempt}: quality - {'; '.join(reasons)}",
+                flush=True,
+            )
+            continue
+
         select = argparse.Namespace(run=args.run, frame=frame, attempt=attempt)
         cmd_select(select)
         print(f"frame {frame:>3} attempt {attempt}: accepted", flush=True)
