@@ -6,9 +6,11 @@ stopped there. That cannot see flicker. A frame 2 levels off its source next to
 one 9 levels off is two passes and one visible pulse; the defect lives in the
 distance between neighbours, not in either frame.
 
-Measured on a 48-frame delivery: every frame inside an absolute limit of 12,
-and the sequence still pulsing, because neighbours differed by up to 6.8 levels
-while the source animation's own neighbours differ by at most 0.53.
+Measured per material, because a per-frame average cannot see it either. The
+materials drift in opposite directions: on a delivered sequence the tunic moved
+15.3 levels between neighbours and the shield 16.4, while the mean over the
+whole character moved 1.47. Averaging the character cancels exactly the defect
+being looked for, and no threshold recovers a quantity that was never measured.
 
 So the limit comes from the source, like the geometry limits do. The source
 says how much this animation's colour really moves; anything beyond that was
@@ -34,25 +36,35 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
-from register_to_authority import erode
-from source_foreground import foreground_mask
+from source_foreground import (
+    MIN_MATERIAL_PIXELS,
+    assign_materials,
+    discover_materials,
+    erode,
+    foreground_mask,
+)
 
-# The source animation's own neighbour swing was 0.22 median, 0.53 worst. Three
-# times the worst leaves honest lighting changes room while still catching a
-# pulse: the delivery that prompted this ran to 7.1.
-DEFAULT_MAX_STEP = 1.6
+# Per material, the source's own neighbour swing was 0.83 median, 7.07 worst --
+# it is a compressed video, not flat cel art, so its materials are steady but
+# not still. The limit sits above the source's worst and well below the output's
+# 16.4.
+DEFAULT_MAX_STEP = 8.0
 ALPHA_OPAQUE = 250
 MIN_INTERIOR_PIXELS = 500
 
 
-def interior_mean(image: np.ndarray, source: np.ndarray | None) -> np.ndarray | None:
-    mask = image[:, :, 3] >= ALPHA_OPAQUE
-    if source is not None:
-        mask = mask & foreground_mask(source)
-    mask = erode(mask, 2)
-    if int(mask.sum()) < MIN_INTERIOR_PIXELS:
-        return None
-    return image[:, :, :3][mask].astype(np.float64).mean(axis=0)
+def material_means(
+    image: np.ndarray, source: np.ndarray, materials: np.ndarray
+) -> dict[int, np.ndarray]:
+    """Mean output colour inside each material, as the source defines it."""
+    labels = assign_materials(source, materials)
+    solid = erode((image[:, :, 3] >= ALPHA_OPAQUE) & (labels >= 0), 2)
+    found: dict[int, np.ndarray] = {}
+    for index in range(len(materials)):
+        region = solid & (labels == index)
+        if int(region.sum()) >= MIN_MATERIAL_PIXELS:
+            found[index] = image[:, :, :3][region].astype(np.float64).mean(axis=0)
+    return found
 
 
 def main() -> int:
@@ -70,29 +82,40 @@ def main() -> int:
 
     manifest = json.loads(args.manifest.read_text())
     directory = Path(manifest["sourceFramesDirectory"])
+    records = manifest.get("frameMapping", [])
 
-    means: dict[int, np.ndarray] = {}
+    def source_of(item: dict) -> np.ndarray | None:
+        path = directory / str(item["sourceFile"])
+        if not path.is_file():
+            return None
+        return np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8)
+
+    # Materials come from a spread of native frames, so a colour that only
+    # appears in part of the loop still gets its own region.
+    sample = [source_of(r) for r in records[:: max(1, len(records) // 4)]]
+    materials = discover_materials([s for s in sample if s is not None])
+    if materials.size == 0:
+        raise SystemExit("no material regions could be found in the source frames")
+
+    means: dict[int, dict[int, np.ndarray]] = {}
     errors: list[str] = []
     numbers: list[int] = []
-    for item in manifest.get("frameMapping", []):
+    for item in records:
         number = int(item["outputFrame"])
         numbers.append(number)
         name = str(item.get("outputFile") or f"frame-{number:03d}.png")
         path = args.frames / name
+        source = source_of(item)
         if not path.is_file():
             errors.append(f"missing output frame {number}")
             continue
-        source_path = directory / str(item["sourceFile"])
-        source = (
-            np.asarray(Image.open(source_path).convert("RGBA"), dtype=np.uint8)
-            if source_path.is_file()
-            else None
-        )
-        found = interior_mean(
-            np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8), source
-        )
-        if found is None:
-            errors.append(f"frame {number}: too little opaque interior to measure")
+        if source is None:
+            errors.append(f"frame {number}: source frame is missing")
+            continue
+        image = np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8)
+        found = material_means(image, source, materials)
+        if not found:
+            errors.append(f"frame {number}: no material region large enough to measure")
             continue
         means[number] = found
 
@@ -104,32 +127,42 @@ def main() -> int:
 
     steps = []
     for first, second in pairs:
-        delta = means[second] - means[first]
-        worst = float(np.abs(delta).max())
+        shared = sorted(set(means[first]) & set(means[second]))
+        per_material = {}
+        worst, worst_material = 0.0, None
+        for index in shared:
+            delta = means[second][index] - means[first][index]
+            value = float(np.abs(delta).max())
+            per_material[str(index)] = round(value, 3)
+            if value > worst:
+                worst, worst_material = value, index
         entry = {
             "from": first,
             "to": second,
-            "delta": [round(float(v), 3) for v in delta],
             "worstChannelStep": round(worst, 3),
+            "worstMaterial": worst_material,
+            "perMaterialStep": per_material,
             "status": "accepted" if worst <= args.max_step else "repair-needed",
         }
         steps.append(entry)
         if worst > args.max_step:
             errors.append(
-                f"frames {first}->{second}: interior colour steps {worst:.2f} "
-                f"levels, over {args.max_step}"
+                f"frames {first}->{second}: material {worst_material} steps "
+                f"{worst:.2f} levels, over {args.max_step}"
             )
 
     observed = [s["worstChannelStep"] for s in steps]
     report = {
         "status": "accepted" if not errors else "repair-needed",
+        "measuredPer": "material",
         "maxStepLimit": args.max_step,
+        "materials": [[round(float(v), 1) for v in m] for m in materials],
         "frameCount": len(means),
         "transitionCount": len(steps),
         "medianStep": round(float(np.median(observed)), 3) if observed else None,
         "maxStep": round(float(max(observed)), 3) if observed else None,
         "failedTransitionCount": sum(s["status"] != "accepted" for s in steps),
-        "errors": errors,
+        "errors": errors[:40],
         "transitions": steps,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

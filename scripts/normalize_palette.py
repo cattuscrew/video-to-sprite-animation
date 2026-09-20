@@ -12,17 +12,24 @@ No per-frame check can see that. A frame sitting 2 levels off and the next
 sitting 9 off are both well inside any sane absolute limit; the flicker is the
 distance between them, and only a gate that looks at neighbours can measure it.
 
-The correction is a per-channel offset on the foreground, chosen so the frame's
-opaque interior has the same mean colour as the same region of its own mapped
-native frame. Deliberately the frame's own source and not a shared reference
-frame: every other stage in this workflow answers to the frame's own authority,
-and matching a single reference would drag a genuine lighting change in the
-animation toward whatever frame was picked. Because the source is stable,
-matching each frame to its own source makes the sequence stable too.
+The correction is a per-channel offset applied per material, chosen so each
+material's opaque pixels have the same mean colour as the same pixels of the
+frame's own mapped native frame.
 
-An offset, not a gain or a per-material fit. Offsets preserve contrast and
-cannot invert anything; the failure mode of a cleverer fit is recolouring a
-material it mis-clustered, which is a worse defect than the one being fixed.
+Per material, because the materials drift independently and often in opposite
+directions: on a delivered sequence the tunic moved 15.3 levels between
+neighbours and the shield 16.4, while the average over the whole character
+moved 1.47. One offset for the whole frame can only cancel what the materials
+share, so it corrects the average and leaves every visible pulse in place. That
+was tried first and changed nothing anyone could see.
+
+The danger of a per-material fit is mis-clustering: a region assigned to the
+wrong material gets recoloured, which is worse than the flicker. That is
+avoided by taking the regions from the native source frame -- stable,
+authoritative, and already pinned to the output by registration -- and never
+from the output being corrected.
+
+Offsets rather than gains: they preserve contrast and cannot invert anything.
 
 Alpha is never touched, and neither is geometry.
 """
@@ -42,75 +49,103 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
-from register_to_authority import erode
-from source_foreground import foreground_mask
+from source_foreground import (
+    MIN_MATERIAL_PIXELS,
+    assign_materials,
+    discover_materials,
+    erode,
+    foreground_mask,
+)
 
-# An offset this large is not tool noise. Measured worst case was 11.2 levels;
-# beyond 24 something is wrong with the frame and shifting it would hide that.
-MAX_OFFSET = 24.0
+# Per material the offsets are larger than the frame-wide one they replaced:
+# measured over 384 frame-material pairs, median 9.5, p99 28.6, worst 29.6. The
+# darkest material -- the artwork's keyline, which the tool renders heavier than
+# the source -- needs 24.5 on its own. The cap sits just above the observed
+# worst, so a frame that is genuinely a different colour is still refused
+# rather than shifted until it matches.
+MAX_OFFSET = 32.0
 MIN_INTERIOR_PIXELS = 500
 ALPHA_OPAQUE = 250
 
 
-def interior_mask(output: np.ndarray, source: np.ndarray) -> np.ndarray:
-    """Pixels solid in the output and character in the source.
+def solid_region(output: np.ndarray, source: np.ndarray) -> np.ndarray:
+    """Pixels solid in the output and character in the source, eroded.
 
-    Eroded, so the soft edge -- where the output legitimately blends toward
-    transparency and the source does not -- cannot pull the mean.
+    The soft edge is excluded: it blends toward transparency in the output and
+    does not in the source, so including it would bias every measurement.
     """
     return erode((output[:, :, 3] >= ALPHA_OPAQUE) & foreground_mask(source), 2)
 
 
-def measure_offset(
-    output: np.ndarray, source: np.ndarray
+def normalize(
+    output: np.ndarray,
+    source: np.ndarray,
+    materials: np.ndarray,
+    max_offset: float = MAX_OFFSET,
 ) -> tuple[np.ndarray | None, dict[str, object]]:
-    """The per-channel shift that puts the output's interior on the source's."""
-    mask = interior_mask(output, source)
-    record: dict[str, object] = {"interiorPixels": int(mask.sum())}
-    if int(mask.sum()) < MIN_INTERIOR_PIXELS:
-        record["error"] = "too little shared interior to measure colour against"
+    """Match each material's colour to the same material in its own source."""
+    record: dict[str, object] = {}
+    labels = assign_materials(source, materials)
+    solid = solid_region(output, source)
+    if int(solid.sum()) < MIN_INTERIOR_PIXELS:
+        record.update({"status": "repair-needed", "error": "too little shared interior"})
         return None, record
-    output_mean = output[:, :, :3][mask].astype(np.float64).mean(axis=0)
-    source_mean = source[:, :, :3][mask].astype(np.float64).mean(axis=0)
-    offset = source_mean - output_mean
-    record.update(
-        {
-            "outputInteriorMean": [round(float(v), 3) for v in output_mean],
-            "sourceInteriorMean": [round(float(v), 3) for v in source_mean],
-            "offset": [round(float(v), 3) for v in offset],
-            "offsetMagnitude": round(float(np.abs(offset).max()), 3),
-        }
+
+    # A frame-wide offset, used for pixels no material claims: the soft edge,
+    # and anywhere the output is drawn but the source says background.
+    fallback = (
+        source[:, :, :3][solid].astype(np.float64).mean(axis=0)
+        - output[:, :, :3][solid].astype(np.float64).mean(axis=0)
     )
-    return offset, record
 
+    offsets: dict[int, np.ndarray] = {}
+    measured: dict[str, list[float]] = {}
+    for index in range(len(materials)):
+        region = solid & (labels == index)
+        if int(region.sum()) < MIN_MATERIAL_PIXELS:
+            continue
+        offset = source[:, :, :3][region].astype(np.float64).mean(axis=0) - output[
+            :, :, :3
+        ][region].astype(np.float64).mean(axis=0)
+        if float(np.abs(offset).max()) > max_offset:
+            record.update(
+                {
+                    "status": "repair-needed",
+                    "error": (
+                        f"material {index} is {float(np.abs(offset).max()):.1f} levels "
+                        f"from its source, over {max_offset}; this frame is not "
+                        "merely drifted"
+                    ),
+                }
+            )
+            return None, record
+        offsets[index] = offset
+        measured[str(index)] = [round(float(v), 3) for v in offset]
 
-def apply_offset(output: np.ndarray, offset: np.ndarray) -> np.ndarray:
-    """Shift every drawn pixel's RGB. Alpha is copied through untouched."""
+    if not offsets:
+        record.update({"status": "repair-needed", "error": "no material large enough"})
+        return None, record
+
     corrected = output.copy()
     drawn = output[:, :, 3] > 0
-    values = output[:, :, :3][drawn].astype(np.float64) + offset
+    shift = np.zeros(output.shape[:2] + (3,), dtype=np.float64)
+    shift[:] = fallback
+    for index, offset in offsets.items():
+        shift[labels == index] = offset
+    values = output[:, :, :3][drawn].astype(np.float64) + shift[drawn]
     corrected[:, :, :3][drawn] = np.clip(np.rint(values), 0, 255).astype(np.uint8)
-    return corrected
 
-
-def normalize(
-    output: np.ndarray, source: np.ndarray, max_offset: float = MAX_OFFSET
-) -> tuple[np.ndarray | None, dict[str, object]]:
-    offset, record = measure_offset(output, source)
-    if offset is None:
-        record["status"] = "repair-needed"
-        return None, record
-    if float(np.abs(offset).max()) > max_offset:
-        record["status"] = "repair-needed"
-        record["error"] = (
-            f"colour offset {float(np.abs(offset).max()):.1f} levels exceeds "
-            f"{max_offset}; this frame is not merely shifted"
-        )
-        return None, record
-    corrected = apply_offset(output, offset)
-    residual = measure_offset(corrected, source)[0]
-    record["residual"] = [round(float(v), 3) for v in residual] if residual is not None else None
-    record["status"] = "accepted"
+    record.update(
+        {
+            "status": "accepted",
+            "materialsCorrected": len(offsets),
+            "offsets": measured,
+            "fallbackOffset": [round(float(v), 3) for v in fallback],
+            "largestOffset": round(
+                float(max(np.abs(o).max() for o in offsets.values())), 3
+            ),
+        }
+    )
     return corrected, record
 
 
@@ -126,6 +161,18 @@ def main() -> int:
     manifest = json.loads(args.manifest.read_text())
     directory = Path(manifest["sourceFramesDirectory"])
     args.output.mkdir(parents=True, exist_ok=True)
+    records_in = manifest.get("frameMapping", [])
+
+    def source_of(item: dict) -> np.ndarray | None:
+        path = directory / str(item["sourceFile"])
+        if not path.is_file():
+            return None
+        return np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8)
+
+    sample = [source_of(r) for r in records_in[:: max(1, len(records_in) // 4)]]
+    materials = discover_materials([s for s in sample if s is not None])
+    if materials.size == 0:
+        raise SystemExit("no material regions could be found in the source frames")
 
     records: list[dict[str, object]] = []
     errors: list[str] = []
@@ -140,7 +187,7 @@ def main() -> int:
             continue
         output = np.asarray(Image.open(frame_path).convert("RGBA"), dtype=np.uint8)
         source = np.asarray(Image.open(source_path).convert("RGBA"), dtype=np.uint8)
-        corrected, record = normalize(output, source, args.max_offset)
+        corrected, record = normalize(output, source, materials, args.max_offset)
         record["outputFrame"] = number
         records.append(record)
         if corrected is None:
@@ -151,11 +198,12 @@ def main() -> int:
         Image.fromarray(corrected, "RGBA").save(args.output / name, format="PNG")
 
     magnitudes = [
-        float(r["offsetMagnitude"]) for r in records if r.get("offsetMagnitude") is not None
+        float(r["largestOffset"]) for r in records if r.get("largestOffset") is not None
     ]
     report = {
         "status": "accepted" if not errors else "repair-needed",
-        "method": "per-channel-offset-to-own-source-frame",
+        "method": "per-material-offset-to-own-source-frame",
+        "materials": [[round(float(v), 1) for v in m] for m in materials],
         "frameCount": len(records),
         "correctedFrameCount": sum(r.get("status") == "accepted" for r in records),
         "maxOffsetApplied": round(max(magnitudes), 3) if magnitudes else None,
