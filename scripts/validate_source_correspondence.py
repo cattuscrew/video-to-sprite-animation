@@ -50,9 +50,14 @@ def main() -> int:
         errors.extend(parent_frame_manifest_errors(parent_manifest, manifest))
         parent_records = list(parent_manifest.get("frameMapping", []))
     source_dir = Path(manifest["sourceFramesDirectory"])
-    frames = sorted(args.frames_dir.glob("frame-*.png"))
-    if len(frames) != len(mapping):
-        errors.append(f"mapping/frame count mismatch {len(mapping)}/{len(frames)}")
+    expected_names = {str(record.get("outputFile")) for record in mapping}
+    unmapped = [
+        path.name
+        for path in sorted(args.frames_dir.glob("frame-*.png"))
+        if path.name not in expected_names
+    ]
+    if unmapped:
+        errors.append(f"frames directory holds unmapped files: {', '.join(unmapped)}")
 
     pose_records: dict[int, dict[str, object]] = {}
     if tool == "GPT Image":
@@ -69,13 +74,24 @@ def main() -> int:
                     pose_records[int(item["outputFrame"])] = item
 
     records: list[dict[str, object]] = []
-    for index, (record, frame_path) in enumerate(zip(mapping, frames), start=1):
+    for index, record in enumerate(mapping, start=1):
         frame_errors: list[str] = []
-        if record.get("outputFile") != frame_path.name:
-            frame_errors.append(
-                f"output filename={frame_path.name} expected={record.get('outputFile')}"
-            )
         source_path = source_dir / str(record["sourceFile"])
+        frame_path = args.frames_dir / str(record.get("outputFile") or "")
+        if not frame_path.is_file():
+            records.append(
+                {
+                    "outputFrame": index,
+                    "nativeFrame": record.get("nativeFrame"),
+                    "sourceFile": str(source_path),
+                    "sourceSha256": None,
+                    "outputSha256": None,
+                    "status": "user-visible-blocked",
+                    "errors": ["missing output frame"],
+                }
+            )
+            errors.append(f"frame {index}: missing output frame")
+            continue
         source_digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
         if source_digest != record.get("sourceSha256"):
             frame_errors.append("selected source frame SHA-256 does not match manifest")

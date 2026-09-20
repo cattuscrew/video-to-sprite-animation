@@ -65,19 +65,21 @@ def main() -> int:
             }
         )
 
+    blocked = sum(r.get("status") == "user-visible-blocked" for r in report_records)
     report = {
-        "status": "complete",
+        "status": "complete" if not blocked else "user-visible-blocked",
         "method": "approved-parent-opaque-rgb-lock",
         "backgroundRemovalTool": "GPT Image",
         "alphaAuthority": "gpt-image-alpha-repair",
         "opaqueThreshold": args.opaque_threshold,
         "frames": report_records,
-        "blockedFrameCount": sum(r.get("status") == "user-visible-blocked" for r in report_records),
+        "blockedFrameCount": blocked,
     }
     (args.output.parent / "parent-foreground-lock-report.json").write_text(
         json.dumps(report, indent=2) + "\n"
     )
-    return 0
+    print(json.dumps({"status": report["status"], "blockedFrameCount": blocked}, indent=2))
+    return 0 if not blocked else 2
 
 
 if __name__ == "__main__":

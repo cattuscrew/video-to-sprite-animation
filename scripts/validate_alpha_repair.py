@@ -37,6 +37,15 @@ def main() -> int:
     parser.add_argument("--max-centroid-delta", type=float, default=1.5)
     parser.add_argument("--max-visible-area-ratio", type=float, default=0.03)
     parser.add_argument("--max-interior-rgb-mae", type=float, default=3.0)
+    parser.add_argument(
+        "--pre-lock-frames",
+        type=Path,
+        help=(
+            "Directory of repaired frames before lock_parent_foreground.py restored "
+            "parent RGB. Interior RGB is meaningless when measured on locked frames, "
+            "because the lock writes the parent's own pixels back."
+        ),
+    )
     args = parser.parse_args()
 
     manifest = json.loads(args.parent_manifest.read_text())
@@ -98,14 +107,29 @@ def main() -> int:
             area_ratio = abs(output_area - parent_area) / max(1, parent_area)
             if area_ratio > args.max_visible_area_ratio:
                 frame_errors.append(f"visible area changed by {area_ratio:.3%}")
+            rgb_image = output
+            if args.pre_lock_frames is not None:
+                pre_lock_path = args.pre_lock_frames / f"frame-{index:03d}.png"
+                if not pre_lock_path.is_file():
+                    frame_errors.append("missing pre-lock frame for interior RGB check")
+                    rgb_image = None
+                else:
+                    rgb_image = np.asarray(
+                        Image.open(pre_lock_path).convert("RGBA"), dtype=np.uint8
+                    )
+                    if rgb_image.shape != parent.shape:
+                        frame_errors.append("pre-lock frame canvas does not match parent")
+                        rgb_image = None
             stable_interior = (parent_alpha >= 250) & (output_alpha >= 250)
-            if not np.any(stable_interior):
+            if rgb_image is None:
+                rgb_mae = None
+            elif not np.any(stable_interior):
                 rgb_mae = None
                 frame_errors.append("no stable opaque interior remains")
             else:
                 delta = np.abs(
                     parent[:, :, :3].astype(np.int16)
-                    - output[:, :, :3].astype(np.int16)
+                    - rgb_image[:, :, :3].astype(np.int16)
                 )
                 rgb_mae = float(np.mean(delta[stable_interior]))
                 if rgb_mae > args.max_interior_rgb_mae:
@@ -127,10 +151,19 @@ def main() -> int:
         )
         errors.extend(f"frame {index}: {error}" for error in frame_errors)
 
+    if args.pre_lock_frames is None:
+        errors.append(
+            "interior RGB was measured on delivered frames; supply --pre-lock-frames "
+            "so the check compares the parent with the repair, not with itself"
+        )
+
     report = {
         "status": "accepted" if not errors else "repair-needed",
         "processingMode": "gpt-image-alpha-repair",
         "parentFrameManifest": str(args.parent_manifest.resolve()),
+        "interiorRgbMeasuredOn": (
+            "pre-lock-repair" if args.pre_lock_frames is not None else "delivered-frames"
+        ),
         "frameCount": len(records),
         "failedFrameCount": sum(r["status"] != "accepted" for r in records),
         "errors": errors,
