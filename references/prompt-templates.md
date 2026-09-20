@@ -28,18 +28,6 @@ Correction: {single observed defect}. Repair only that defect while preserving t
 
 Do not retry from a prior failed output or a canonical master.
 
-## GPT-only alpha repair
-
-```text
-Edit approved parent frame {output_frame}, bound to native frame {native_frame}, to repair transparency only.
-
-The parent image is the primary edit target and foreground authority. Preserve its exact canvas, character size, pixel placement, pose, silhouette, outlines, colors, eyes, equipment geometry, and every correct foreground region. The mapped native frame is pose-verification authority only. The canonical color reference is appearance-only.
-
-Remove contaminated background edge pixels and make true background and named negative spaces genuinely transparent. Do not zoom, crop, enlarge, recenter, redraw, recolor, restyle, substitute another pose, or change any interior foreground pixels.
-```
-
-Bind every invocation to the parent SHA-256 and source SHA-256 in `parent-frame-manifest.json`. Never repair from a rejected attempt.
-
 ## Synthesized exception
 
 Canonical-master generation, key-pose generation, and in-between prompts belong only to explicitly approved `frameConstruction: synthesized`. They must never be used in a one-to-one source-frame build.

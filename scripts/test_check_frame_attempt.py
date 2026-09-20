@@ -44,10 +44,10 @@ class AttemptCheckTests(unittest.TestCase):
     def setUp(self) -> None:
         self._directory = tempfile.TemporaryDirectory()
         self.run = Path(self._directory.name) / "run"
-        self.parents = self.run / "parents"
+        self.natives = self.run / "natives"
         # Each frame's authority sits two pixels right of the one before.
         for frame in range(1, FRAME_COUNT + 1):
-            save(self.parents / f"frame-{frame:03d}.png", sprite(10 + 2 * frame))
+            save(self.natives / f"frame-{frame:03d}.png", sprite(10 + 2 * frame))
             job = self.run / "jobs" / f"{frame:03d}" / "job.json"
             job.parent.mkdir(parents=True, exist_ok=True)
             job.write_text(
@@ -56,10 +56,10 @@ class AttemptCheckTests(unittest.TestCase):
                         "outputFrame": frame,
                         "outputFile": f"frame-{frame:03d}.png",
                         "nativeFrame": 150 + frame,
-                        "editTarget": "parent",
-                        "authority": str(self.parents / f"frame-{frame:03d}.png"),
-                        "parentFile": str(self.parents / f"frame-{frame:03d}.png"),
-                        "parentSha256": sha256(self.parents / f"frame-{frame:03d}.png"),
+                        "editTarget": "source",
+                        "authority": str(self.natives / f"frame-{frame:03d}.png"),
+                        "sourceFile": str(self.natives / f"frame-{frame:03d}.png"),
+                        "sourceSha256": sha256(self.natives / f"frame-{frame:03d}.png"),
                     }
                 )
             )

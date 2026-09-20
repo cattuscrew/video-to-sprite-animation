@@ -11,11 +11,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from delivery_policy import (
-    ONE_TO_ONE,
-    mapping_manifest_errors,
-    parent_frame_manifest_errors,
-)
+from delivery_policy import ONE_TO_ONE, mapping_manifest_errors
 
 
 def main() -> int:
@@ -28,7 +24,6 @@ def main() -> int:
         type=Path,
         help="Required for GPT Image; full-frame source/output pose review JSON",
     )
-    parser.add_argument("--parent-frame-manifest", type=Path)
     args = parser.parse_args()
 
     manifest = json.loads(args.source_manifest.read_text())
@@ -43,12 +38,6 @@ def main() -> int:
         raise SystemExit("manifest sharedTransform requires canvas and offset pairs")
 
     mapping = list(manifest.get("frameMapping", []))
-    parent_records: list[dict[str, object]] = []
-    alpha_repair = args.parent_frame_manifest is not None
-    if args.parent_frame_manifest:
-        parent_manifest = json.loads(args.parent_frame_manifest.read_text())
-        errors.extend(parent_frame_manifest_errors(parent_manifest, manifest))
-        parent_records = list(parent_manifest.get("frameMapping", []))
     source_dir = Path(manifest["sourceFramesDirectory"])
     expected_names = {str(record.get("outputFile")) for record in mapping}
     unmapped = [
@@ -126,20 +115,6 @@ def main() -> int:
                     )
             if not pose.get("sourceOutputComparisonArtifact"):
                 frame_errors.append("pose report lacks sourceOutputComparisonArtifact")
-            if alpha_repair:
-                parent = parent_records[index - 1] if index <= len(parent_records) else {}
-                required_parent = {
-                    "parentSha256": parent.get("parentSha256"),
-                    "parentGeometryPreserved": True,
-                    "parentForegroundPreserved": True,
-                }
-                for key, value in required_parent.items():
-                    if pose.get(key) != value:
-                        frame_errors.append(
-                            f"pose report {key}={pose.get(key)!r} expected={value!r}"
-                        )
-                if not pose.get("parentOutputComparisonArtifact"):
-                    frame_errors.append("pose report lacks parentOutputComparisonArtifact")
 
         records.append(
             {
@@ -158,11 +133,7 @@ def main() -> int:
     report = {
         "status": "accepted" if not errors else "repair-needed",
         "backgroundRemovalTool": tool,
-        "correspondenceType": (
-            "selected-frame-parent-and-pose"
-            if alpha_repair
-            else "selected-frame-and-pose"
-        ),
+        "correspondenceType": "selected-frame-and-pose",
         "sourceManifest": str(args.source_manifest.resolve()),
         "frameCount": len(records),
         "failedFrameCount": sum(record["status"] != "accepted" for record in records),

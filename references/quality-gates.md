@@ -40,7 +40,7 @@ Motion checks need motion. Watching the exact-FPS preview is the direct way; whe
 
 Prefer MP4 for both previews. GIF frame delays are whole centiseconds, so 24fps becomes 25 and an "exact FPS" preview is not exact.
 
-Render the artifacts before judging: `scripts/build_qa_artifacts.py` writes the exact-FPS preview, the slowed preview, triplets for the flagged frames, a whole-batch onion sheet, and per-frame comparisons against both the approved parent and the mapped native frame. It sets every reviewed flag false, because rendering a picture is not the same as having seen it. A reviewer sets them; the delivery gate then checks each named artifact exists.
+Render the artifacts before judging: `scripts/build_qa_artifacts.py` writes the exact-FPS preview, the slowed preview, triplets for the flagged frames, a whole-batch onion sheet, and per-frame comparisons against the mapped native frame. It also decodes the preview back and compares it with the frame it claims to show, because a lossy encode rings around a sprite edge and the ringing reads as a contaminated matte. It sets every reviewed flag false, because rendering a picture is not the same as having seen it. A reviewer sets them; the delivery gate then checks each named artifact exists.
 
 Inspect at normal speed, slow speed, and as previous/current/next triplets. Use:
 
@@ -60,7 +60,9 @@ Run `scripts/validate_source_correspondence.py`. Require source SHA lineage and 
 
 For GPT per-frame editing, compare each output first with its exact mapped source and then with previous/current/next outputs. Treat changed pose, filled hair/shoulder gaps, changing eye construction, shifted equipment, or redrawn outlines as drift.
 
-For GPT alpha repair, compare in this order: approved parent/output for foreground identity, exact source/output for pose correspondence, then previous/current/next outputs for temporal stability. Reject canvas-size changes, zoom, recentering, parent foreground redraw, material-color changes, or line changes even if the new alpha looks cleaner.
+Compare in this order: exact source/output for pose correspondence, then previous/current/next outputs for temporal stability. Reject canvas-size changes, zoom, recentering, foreground redraw, material-color changes, or line changes even if the new alpha looks cleaner.
+
+Judge a transparent edge on black, not only on the checkerboard. A coloured or ragged rim is close to invisible against a mid-tone check pattern. Judge it on a lossless preview too: a defect the encoder invented is indistinguishable from one the image tool did.
 
 Prepare the review with `scripts/build_pose_correspondence.py`. It renders a full-resolution comparison per frame and fills in the native frame, both digests and the artifact link; it leaves every judgement false. Whether a silhouette survived, whether the eyes are still two dots, whether the sword sits at the same angle -- no checksum sees any of that, which is why the gate asks a reviewer. Accepting a review of 46 frames does not accept 48: a missing frame keeps the report pending.
 

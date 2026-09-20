@@ -124,8 +124,8 @@ def resolve_source_directory(
 ) -> Path:
     """Where the native frames live.
 
-    A parent manifest names each source frame but keeps the directory in the
-    source manifest it points at. Read only the first and every job gets a bare
+    A manifest may name each source file but keep the directory in another
+    manifest it points at. Read only the first and every job gets a bare
     filename, which the image tool rejects outright.
     """
     if override:
@@ -155,7 +155,6 @@ def cmd_init(args: argparse.Namespace) -> int:
         raise SystemExit("manifest has no frameMapping")
 
     mode = manifest.get("processingMode") or "gpt-image-per-frame-edit"
-    parent_dir = Path(manifest.get("parentFramesDirectory", ""))
     source_dir = resolve_source_directory(manifest, args.manifest, args.source_frames)
 
     created = 0
@@ -173,14 +172,10 @@ def cmd_init(args: argparse.Namespace) -> int:
             "sourceFile": str(source_dir / str(record["sourceFile"])) if record.get("sourceFile") else None,
             "sourceSha256": record.get("sourceSha256"),
         }
-        if record.get("parentFile"):
-            job["parentFile"] = str(parent_dir / str(record["parentFile"]))
-            job["parentSha256"] = record.get("parentSha256")
-            job["editTarget"] = "parent"
-            job["authority"] = job["parentFile"]
-        else:
-            job["editTarget"] = "source"
-            job["authority"] = job["sourceFile"]
+        # The mapped native frame is both the edit target and the authority:
+        # there is no second lineage to confuse it with.
+        job["editTarget"] = "source"
+        job["authority"] = job["sourceFile"]
         if args.prompt:
             job["promptSha256"] = sha256(args.prompt)
         if args.short_prompt:
@@ -190,7 +185,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             job["colorReferenceSha256"] = sha256(args.color_reference)
         unresolved = [
             f"{key}={job[key]}"
-            for key in ("authority", "sourceFile", "parentFile")
+            for key in ("authority", "sourceFile")
             if job.get(key) and not Path(job[key]).is_file()
         ]
         if unresolved:
@@ -470,10 +465,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             "--record",
             str(directory / "check.json"),
         ]
-        if job.get("editTarget") == "parent":
-            # Alpha repair may change transparency and contaminated edges only,
-            # so the approved parent's interior colour goes back.
-            command.append("--lock-interior")
         registration = subprocess.run(command, capture_output=True, text=True)
         if registration.returncode != 0:
             record_path = directory / "record.json"

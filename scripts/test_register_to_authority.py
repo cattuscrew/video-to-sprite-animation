@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for translation-only registration and the matte clamp."""
+"""Tests for translation-only registration onto the native source frame."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import numpy as np
 from PIL import Image
 
 from register_to_authority import (
-    ALPHA_VISIBLE,
     erode,
     estimate_shift,
     luma,
@@ -20,9 +19,24 @@ from register_to_authority import (
 
 
 CANVAS = 96
+GREEN = (16, 245, 50)  # the measured source background
 
 
-def authority_frame() -> np.ndarray:
+def native_frame(sprite: np.ndarray) -> np.ndarray:
+    """The sprite as the camera saw it: opaque, on the green screen.
+
+    Registration measures against this, so the fixture has to be the kind of
+    image the run actually has -- a frame with no alpha channel to lean on.
+    """
+    out = np.empty_like(sprite)
+    out[:, :, :3] = np.where(
+        (sprite[:, :, 3] > 0)[:, :, None], sprite[:, :, :3], np.array(GREEN, np.uint8)
+    )
+    out[:, :, 3] = 255
+    return out
+
+
+def sprite_frame() -> np.ndarray:
     """A sprite with enough internal structure for a gradient fit: a body, a
     darker outline and two interior features."""
     image = np.zeros((CANVAS, CANVAS, 4), dtype=np.uint8)
@@ -57,12 +71,13 @@ def upscale(image: np.ndarray, factor: float) -> np.ndarray:
 
 class EstimatorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.authority = authority_frame()
-        self.mask = erode(self.authority[:, :, 3] >= 250, 2)
+        self.sprite = sprite_frame()
+        self.authority = native_frame(self.sprite)
+        self.mask = erode(self.sprite[:, :, 3] >= 250, 2)
 
     def recover(self, dx: float, dy: float) -> float:
-        moved = luma(shift_rgba(self.authority, dx, dy))
-        found_x, found_y = estimate_shift(moved, luma(self.authority), self.mask)
+        moved = luma(shift_rgba(self.sprite, dx, dy))
+        found_x, found_y = estimate_shift(moved, luma(self.sprite), self.mask)
         return math.hypot(found_x - dx, found_y - dy)
 
     def test_recovers_known_sub_pixel_shifts(self) -> None:
@@ -76,46 +91,57 @@ class EstimatorTests(unittest.TestCase):
 
 class RegisterTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.authority = authority_frame()
+        self.sprite = sprite_frame()
+        self.authority = native_frame(self.sprite)
 
     def test_identical_input_needs_no_shift(self) -> None:
-        image, record = register(self.authority.copy(), self.authority)
+        image, record = register(self.sprite.copy(), self.authority)
         self.assertEqual(record["status"], "accepted")
         self.assertLess(record["shiftPixels"], 0.05)
         self.assertIsNotNone(image)
 
     def test_oversized_input_is_brought_back_to_the_authority_canvas(self) -> None:
-        image, record = register(upscale(self.authority, 1.7417), self.authority)
+        image, record = register(upscale(self.sprite, 1.7417), self.authority)
         self.assertEqual(record["status"], "accepted", record.get("errors"))
         self.assertEqual(image.shape, self.authority.shape)
 
     def test_a_known_offset_is_measured_and_undone(self) -> None:
-        moved = shift_rgba(self.authority, 0.4, -0.3)
+        moved = shift_rgba(self.sprite, 0.4, -0.3)
         image, record = register(moved, self.authority)
         self.assertEqual(record["status"], "accepted", record.get("errors"))
         self.assertAlmostEqual(record["dx"], 0.4, delta=0.08)
         self.assertAlmostEqual(record["dy"], -0.3, delta=0.08)
         residual = estimate_shift(
-            luma(image), luma(self.authority), erode(self.authority[:, :, 3] >= 250, 2)
+            luma(image), luma(self.authority), erode(self.sprite[:, :, 3] >= 250, 2)
         )
         self.assertLess(math.hypot(*residual), 0.1)
 
-    def test_matte_outside_the_authority_is_removed_and_counted(self) -> None:
-        grown = self.authority.copy()
+    def test_a_large_invented_halo_is_rejected(self) -> None:
+        """Nothing trims matte any more, so a halo has to fail the gate.
+
+        Trimming needed an approved outline to trim to. Measured against the
+        source silhouette the only honest move is to reject: a sprite carrying
+        a halo this size is not the frame that was asked for.
+        """
+        grown = self.sprite.copy()
         halo = np.zeros((CANVAS, CANVAS), dtype=bool)
         halo[16:80, 24:72] = True
         halo &= grown[:, :, 3] == 0
-        grown[halo] = (90, 140, 190, 90)  # semi-transparent matte, as the tool adds
-        image, record = register(grown, self.authority)
+        grown[halo] = (90, 140, 190, 90)
+        _, record = register(grown, self.authority)
+        self.assertEqual(record["status"], "repair-needed", record)
+        self.assertTrue(any("against the source silhouette" in e for e in record["errors"]))
+
+    def test_an_honest_soft_edge_is_accepted(self) -> None:
+        """The gate must not fire on the few percent an anti-aliased alpha
+        channel and a chroma test legitimately disagree about."""
+        _, record = register(self.sprite.copy(), self.authority)
         self.assertEqual(record["status"], "accepted", record.get("errors"))
-        self.assertEqual(record["clampedPixels"], int(halo.sum()))
-        self.assertLessEqual(record["areaGrowth"], 0.0)
-        outside = image[:, :, 3][self.authority[:, :, 3] <= ALPHA_VISIBLE]
-        self.assertEqual(int(outside.max()), 0)
+        self.assertLess(abs(record["areaDeviation"]), 0.05)
 
     def test_a_scaled_sprite_is_rejected_as_warp(self) -> None:
-        bigger = np.zeros_like(self.authority)
-        scaled = upscale(self.authority, 1.05)
+        bigger = np.zeros_like(self.sprite)
+        scaled = upscale(self.sprite, 1.05)
         offset = (scaled.shape[0] - CANVAS) // 2
         bigger[:, :] = scaled[offset : offset + CANVAS, offset : offset + CANVAS]
         _, record = register(bigger, self.authority)
@@ -123,20 +149,20 @@ class RegisterTests(unittest.TestCase):
         self.assertTrue(any("scale or warp" in e for e in record["errors"]))
 
     def test_a_shrunken_sprite_is_rejected_rather_than_silently_clamped(self) -> None:
-        smaller = np.zeros_like(self.authority)
-        smaller[30:66, 34:62] = self.authority[30:66, 34:62]
+        smaller = np.zeros_like(self.sprite)
+        smaller[30:66, 34:62] = self.sprite[30:66, 34:62]
         _, record = register(smaller, self.authority)
         self.assertEqual(record["status"], "repair-needed")
-        self.assertTrue(any("shrank" in e for e in record["errors"]))
+        self.assertTrue(any("against the source silhouette" in e for e in record["errors"]))
 
     def test_an_empty_repair_cannot_be_registered(self) -> None:
-        _, record = register(np.zeros_like(self.authority), self.authority)
+        _, record = register(np.zeros_like(self.sprite), self.authority)
         self.assertEqual(record["status"], "repair-needed")
         self.assertTrue(any("stable opaque interior" in e for e in record["errors"]))
 
     def test_an_offset_beyond_the_cap_is_rejected(self) -> None:
         _, record = register(
-            shift_rgba(self.authority, 1.2, 0.0), self.authority, max_shift=0.5
+            shift_rgba(self.sprite, 1.2, 0.0), self.authority, max_shift=0.5
         )
         self.assertEqual(record["status"], "repair-needed")
         self.assertTrue(any("exceeds" in e for e in record["errors"]))

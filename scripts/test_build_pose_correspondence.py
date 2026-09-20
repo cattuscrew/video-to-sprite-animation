@@ -41,11 +41,10 @@ class PoseReportTests(unittest.TestCase):
     def build(self, *extra: str, drop: int | None = None) -> tuple[dict, Path]:
         self._directory = tempfile.TemporaryDirectory()
         root = Path(self._directory.name)
-        source, parents, frames = root / "source", root / "parents", root / "frames"
+        source, frames = root / "source", root / "frames"
         mapping = []
         for index in range(1, FRAME_COUNT + 1):
             write(source / f"frame-{index:03d}.png", 6 + index)
-            write(parents / f"frame-{index:03d}.png", 6 + index)
             if index != drop:
                 write(frames / f"frame-{index:03d}.png", 6 + index)
             mapping.append(
@@ -54,21 +53,16 @@ class PoseReportTests(unittest.TestCase):
                     "outputFile": f"frame-{index:03d}.png",
                     "nativeFrame": 150 + index,
                     "sourceFile": f"frame-{index:03d}.png",
-                    "parentFile": f"frame-{index:03d}.png",
                 }
             )
         source_manifest = root / "source-frame-manifest.json"
         source_manifest.write_text(
             json.dumps({"sourceFramesDirectory": str(source), "frameMapping": mapping})
         )
-        parent_manifest = root / "parent-frame-manifest.json"
-        parent_manifest.write_text(
-            json.dumps({"parentFramesDirectory": str(parents), "frameMapping": mapping})
-        )
         subprocess.run(
             [
                 sys.executable, str(SCRIPT), str(source_manifest), str(frames),
-                str(root / "qa"), "--parent-frame-manifest", str(parent_manifest), *extra,
+                str(root / "qa"), *extra,
             ],
             capture_output=True,
             text=True,
@@ -85,7 +79,6 @@ class PoseReportTests(unittest.TestCase):
         self.assertEqual(entry["nativeFrame"], 152)
         self.assertEqual(len(entry["sourceSha256"]), 64)
         self.assertEqual(len(entry["outputSha256"]), 64)
-        self.assertEqual(len(entry["parentSha256"]), 64)
         self.assertTrue(all(entry[key] is False for key in JUDGEMENTS))
         self.assertEqual(report["status"], "pending-review")
 

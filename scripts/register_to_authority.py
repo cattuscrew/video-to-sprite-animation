@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Place one repaired frame onto its authority frame without redrawing it.
+"""Place one edited frame back onto its own native source frame.
 
 The image tool returns a canvas larger than the one it was given and places the
-sprite a fraction of a pixel away from where the authority frame has it. Left
+sprite a fraction of a pixel away from where the native frame has it. Left
 alone, that sub-pixel wander varies frame to frame and shows up as temporal
 jitter that no per-frame gate can see. This script measures the offset on the
-part of the sprite both images agree is solid, applies it as a pure
-translation, and removes any matte the repair invented outside the authority's
-own outline.
+part of the sprite that is solid in the output and character in the source,
+applies it as a pure translation, and unmixes the background colour out of the
+soft edge.
 
 Translation only. No scale, no rotation, no per-frame recentering: the offset
-is measured against this frame's own authority, never against a neighbour.
+is measured against this frame's own mapped native frame, never against a
+neighbour and never against a batch average.
+
+Nothing here decides transparency. The source silhouette is used to choose
+which pixels to measure on; the delivered alpha is the tool's, untouched.
 """
 
 from __future__ import annotations
@@ -29,15 +33,22 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
+from source_foreground import foreground_mask
+
 
 # Limits calibrated on the 48-frame run of 2026-09-20; see the reasoning in
 # references/failure-prevention.md.
 MAX_SHIFT_PIXELS = 2.0          # observed max 0.594
 MAX_QUADRANT_SPREAD = 0.40      # observed max 0.259; a 0.5% scale gives 0.626
 MAX_REMAINING_SHIFT = 0.05      # observed 0.0000 on every frame
-MIN_AREA_GROWTH = -0.01         # the clamp cannot restore a shrunken sprite
+# Measured across the 48 delivered frames of 2026-09-20 against their own
+# source silhouettes: -0.6% to +2.2%. The limit is deliberately far looser than
+# that spread, because this gate is for a sprite that lost a limb or grew a
+# halo, not for the few percent of honest disagreement between a chroma test
+# and an anti-aliased alpha channel.
+MAX_AREA_DEVIATION = 0.10
 ALPHA_VISIBLE = 18              # silhouette threshold shared with the temporal gates
-ALPHA_OPAQUE = 250              # the stable interior the lock also uses
+ALPHA_OPAQUE = 250              # the stable interior registration measures on
 MIN_INTERIOR_PIXELS = 500
 
 
@@ -184,50 +195,38 @@ def premultiplied_shift_and_fit(
     return straight.astype(np.uint8)
 
 
-def lock_interior(
-    registered: np.ndarray, authority: np.ndarray
-) -> tuple[np.ndarray, int]:
-    """Restore the authority's own RGB wherever both are fully opaque.
-
-    The repair is authorised to change transparency and contaminated edge
-    pixels, nothing else. Interior colour that moved is drift, so it is put
-    back. Alpha and edge RGB are left exactly as the tool produced them.
-    """
-    stable = (authority[:, :, 3] >= ALPHA_OPAQUE) & (registered[:, :, 3] >= ALPHA_OPAQUE)
-    out = registered.copy()
-    out[:, :, :3][stable] = authority[:, :, :3][stable]
-    return out, int(np.count_nonzero(stable))
-
-
 def register(
-    repaired: np.ndarray,
+    edited: np.ndarray,
     authority: np.ndarray,
     max_shift: float = MAX_SHIFT_PIXELS,
     max_spread: float = MAX_QUADRANT_SPREAD,
     max_remaining: float = MAX_REMAINING_SHIFT,
-    min_growth: float = MIN_AREA_GROWTH,
-    lock: bool = False,
+    max_area_deviation: float = MAX_AREA_DEVIATION,
 ) -> tuple[np.ndarray | None, dict[str, object]]:
-    """Register `repaired` onto `authority` and clamp its matte to the
-    authority's outline. Returns (image, record); image is None when rejected."""
+    """Register `edited` onto its native `authority` frame.
+
+    Returns (image, record); image is None when the frame is rejected.
+    """
     canvas = (authority.shape[1], authority.shape[0])
     errors: list[str] = []
     record: dict[str, object] = {
         "canvas": list(canvas),
-        "inputSize": [repaired.shape[1], repaired.shape[0]],
+        "inputSize": [edited.shape[1], edited.shape[0]],
     }
 
-    authority_alpha = authority[:, :, 3]
-    scale_x = repaired.shape[1] / authority.shape[1]
-    scale_y = repaired.shape[0] / authority.shape[0]
+    scale_x = edited.shape[1] / authority.shape[1]
+    scale_y = edited.shape[0] / authority.shape[0]
 
     # Measure at authority resolution so the offset is in canvas pixels.
     measurable = np.asarray(
-        Image.fromarray(repaired, "RGBA").resize(canvas, Image.LANCZOS), dtype=np.uint8
+        Image.fromarray(edited, "RGBA").resize(canvas, Image.LANCZOS), dtype=np.uint8
     )
-    interior = erode(
-        (authority_alpha >= ALPHA_OPAQUE) & (measurable[:, :, 3] >= ALPHA_OPAQUE), 2
-    )
+    # Measure only where the output is solid and the source says character:
+    # the eroded overlap excludes the soft edge, whose colour is about to
+    # change, and excludes the screen, whose flat green has no gradient to
+    # register against.
+    source_mask = foreground_mask(authority)
+    interior = erode(source_mask & (measurable[:, :, 3] >= ALPHA_OPAQUE), 2)
     record["interiorPixels"] = int(interior.sum())
     if record["interiorPixels"] < MIN_INTERIOR_PIXELS:
         errors.append("no stable opaque interior to register against")
@@ -258,6 +257,7 @@ def register(
             "quadrantSpreadPixels": None if math.isnan(spread) else round(spread, 4),
             "remainingShiftPixels": round(remaining, 4),
             "method": "translation-only-gauss-newton",
+            "authorityKind": "selected-native-source-frame",
         }
     )
 
@@ -271,38 +271,27 @@ def register(
     if remaining > max_remaining:
         errors.append(f"registration left {remaining:.3f}px unresolved")
 
-    registered = premultiplied_shift_and_fit(repaired, dx * scale_x, dy * scale_y, canvas)
+    registered = premultiplied_shift_and_fit(edited, dx * scale_x, dy * scale_y, canvas)
 
-    # Clamp: alpha repair may remove matte, never add it outside the authority.
-    authority_mask = authority_alpha > ALPHA_VISIBLE
-    registered_alpha = registered[:, :, 3]
-    outside = (registered_alpha > 0) & ~authority_mask
-    clamped_pixels = int(np.count_nonzero(outside & (registered_alpha > ALPHA_VISIBLE)))
-    registered[outside, 3] = 0
-    registered[outside, :3] = 0
-
-    authority_area = int(authority_mask.sum())
+    # There is no parent outline to clamp to any more, so the source silhouette
+    # is a gate rather than a mask: a sprite far larger or smaller than the
+    # character in its own source frame has lost or gained something, and that
+    # is a rejection, not something to trim into shape.
+    source_area = int(source_mask.sum())
     final_area = int(np.count_nonzero(registered[:, :, 3] > ALPHA_VISIBLE))
-    growth = (final_area - authority_area) / max(1, authority_area)
+    deviation = (final_area - source_area) / max(1, source_area)
     record.update(
         {
-            "clampedPixels": clamped_pixels,
-            "areaGrowth": round(growth, 5),
-            "mattePolicy": "never-exceeds-authority-support",
+            "sourceArea": source_area,
+            "visibleArea": final_area,
+            "areaDeviation": round(deviation, 5),
         }
     )
-    if growth > 0:
-        errors.append(f"area grew {growth:.3%} after clamping, which is impossible")
-    if growth < min_growth:
+    if abs(deviation) > max_area_deviation:
         errors.append(
-            f"visible area shrank {growth:.3%}, below {min_growth:.1%}; "
-            "the clamp cannot restore a sprite the repair made smaller"
+            f"visible area is {deviation:+.2%} against the source silhouette, "
+            f"outside {max_area_deviation:.0%}"
         )
-
-    if lock and not errors:
-        registered, restored = lock_interior(registered, authority)
-        record["interiorPixelsRestored"] = restored
-        record["alphaChangedByLock"] = False
 
     record["errors"] = errors
     record["status"] = "accepted" if not errors else "repair-needed"
@@ -311,33 +300,27 @@ def register(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("repaired", type=Path, help="raw image-tool output")
-    parser.add_argument("authority", type=Path, help="approved parent frame")
-    parser.add_argument("output", type=Path, help="registered, clamped PNG")
+    parser.add_argument("edited", type=Path, help="raw image-tool output")
+    parser.add_argument("authority", type=Path, help="mapped native source frame")
+    parser.add_argument("output", type=Path, help="registered, decontaminated PNG")
     parser.add_argument("--record", type=Path, help="write the measurement JSON here")
     parser.add_argument("--max-shift-pixels", type=float, default=MAX_SHIFT_PIXELS)
     parser.add_argument("--max-quadrant-spread", type=float, default=MAX_QUADRANT_SPREAD)
     parser.add_argument("--max-remaining-shift", type=float, default=MAX_REMAINING_SHIFT)
-    parser.add_argument("--min-area-growth", type=float, default=MIN_AREA_GROWTH)
-    parser.add_argument(
-        "--lock-interior",
-        action="store_true",
-        help="restore the authority's RGB where both are opaque (alpha repair)",
-    )
+    parser.add_argument("--max-area-deviation", type=float, default=MAX_AREA_DEVIATION)
     args = parser.parse_args()
 
-    repaired = np.asarray(Image.open(args.repaired).convert("RGBA"), dtype=np.uint8)
+    edited = np.asarray(Image.open(args.edited).convert("RGBA"), dtype=np.uint8)
     authority = np.asarray(Image.open(args.authority).convert("RGBA"), dtype=np.uint8)
     registered, record = register(
-        repaired,
+        edited,
         authority,
         max_shift=args.max_shift_pixels,
         max_spread=args.max_quadrant_spread,
         max_remaining=args.max_remaining_shift,
-        min_growth=args.min_area_growth,
-        lock=args.lock_interior,
+        max_area_deviation=args.max_area_deviation,
     )
-    record["repaired"] = str(args.repaired)
+    record["edited"] = str(args.edited)
     record["authority"] = str(args.authority)
 
     if registered is not None:

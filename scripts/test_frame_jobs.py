@@ -25,9 +25,9 @@ def write_png(path: Path) -> None:
 
 
 def manifest(root: Path) -> Path:
-    parents = root / "parents"
+    natives = root / "natives"
     for index in range(1, FRAME_COUNT + 1):
-        write_png(parents / f"frame-{index:03d}.png")
+        write_png(natives / f"frame-{index:03d}.png")
     mapping = [
         {
             "outputFrame": index,
@@ -35,18 +35,14 @@ def manifest(root: Path) -> Path:
             "nativeFrame": 150 + index,
             "sourceFile": f"frame-{index:03d}.png",
             "sourceSha256": "0" * 64,
-            "parentFile": f"frame-{index:03d}.png",
-            "parentSha256": "1" * 64,
-        }
+            }
         for index in range(1, FRAME_COUNT + 1)
     ]
-    path = root / "parent-frame-manifest.json"
+    path = root / "source-frame-manifest.json"
     path.write_text(
         json.dumps(
             {
-                "processingMode": "gpt-image-alpha-repair",
-                "parentFramesDirectory": str(parents),
-                "sourceFramesDirectory": str(parents),
+                "sourceFramesDirectory": str(natives),
                 "frameCount": FRAME_COUNT,
                 "frameMapping": mapping,
             }
@@ -87,8 +83,9 @@ class InitTests(unittest.TestCase):
             third = json.loads((run / "jobs" / "003" / "job.json").read_text())
             self.assertEqual(third["outputFrame"], 3)
             self.assertEqual(third["nativeFrame"], 153)
-            self.assertEqual(third["editTarget"], "parent")
-            self.assertTrue(third["authority"].endswith("parents/frame-003.png"))
+            self.assertEqual(third["editTarget"], "source")
+            self.assertTrue(third["authority"].endswith("natives/frame-003.png"))
+            self.assertEqual(third["authority"], third["sourceFile"])
 
     def test_existing_jobs_are_left_alone(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

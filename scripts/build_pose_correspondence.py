@@ -43,7 +43,6 @@ JUDGEMENTS = (
     "noMasterWarp",
 )
 
-PARENT_JUDGEMENTS = ("parentGeometryPreserved", "parentForegroundPreserved")
 
 
 def sha256(path: Path) -> str:
@@ -58,6 +57,14 @@ def checkerboard(size: tuple[int, int], tile: int = 16) -> Image.Image:
             if (x // tile + y // tile) % 2:
                 draw.rectangle((x, y, x + tile - 1, y + tile - 1), fill=(200, 200, 200, 255))
     return board
+
+
+def on_black(path: Path) -> Image.Image:
+    """The view a coloured or ragged rim actually shows up in."""
+    sprite = Image.open(path).convert("RGBA")
+    board = Image.new("RGBA", sprite.size, (0, 0, 0, 255))
+    board.alpha_composite(sprite)
+    return board.convert("RGB")
 
 
 def on_checker(path: Path) -> Image.Image:
@@ -100,19 +107,21 @@ def visible_box(path: Path) -> tuple[int, int, int, int]:
 
 
 def fragile_strip(
-    parent: Path, output: Path, frame: int, zoom: float = 1.6
+    source: Path, output: Path, frame: int, zoom: float = 1.6
 ) -> Image.Image:
-    """Parent above, output below, one column per fragile region.
+    """Native source above, output below, one column per fragile region.
 
     Magnified, because a halo two pixels wide is invisible at 100% and obvious
-    when enlarged -- and two pixels is the whole subject of an alpha repair.
-    Every tile is the same size and the two rows line up, so the eye compares
-    the pair rather than hunting for it.
+    when enlarged. Every tile is the same size and the two rows line up, so the
+    eye compares the pair rather than hunting for it.
+
+    The output is shown on black, not on the checkerboard: a coloured or ragged
+    rim disappears against a mid-tone check pattern and is plain against black.
     """
-    left, top, right, bottom = visible_box(parent)
+    left, top, right, bottom = visible_box(output)
     width, height = right - left, bottom - top
-    parent_image = on_checker(parent)
-    output_image = on_checker(output)
+    source_image = Image.open(source).convert("RGB")
+    output_image = on_black(output)
 
     columns: list[tuple[str, Image.Image, Image.Image]] = []
     for name, (x0, y0, x1, y1) in FRAGILE_REGIONS.items():
@@ -123,8 +132,8 @@ def fragile_strip(
             top + int(y1 * height),
         )
         pair = []
-        for source in (parent_image, output_image):
-            patch = source.crop(box)
+        for image in (source_image, output_image):
+            patch = image.crop(box)
             patch = patch.resize(
                 (max(1, int(patch.width * zoom)), max(1, int(patch.height * zoom))),
                 Image.NEAREST,
@@ -140,13 +149,17 @@ def fragile_strip(
         (24, 24, 24),
     )
     draw = ImageDraw.Draw(sheet)
-    draw.text((4, 3), f"frame {frame:03d}   parent (upper) / output (lower)", fill="white")
+    draw.text(
+        (4, 3),
+        f"frame {frame:03d}   native source (upper) / output on black (lower)",
+        fill="white",
+    )
     x = 0
-    for name, parent_tile, output_tile in columns:
+    for name, source_tile, output_tile in columns:
         draw.text((x + 4, label_height + 1), name, fill="#9ad")
-        sheet.paste(parent_tile, (x, label_height * 2))
+        sheet.paste(source_tile, (x, label_height * 2))
         sheet.paste(output_tile, (x, label_height * 2 + row_height + label_height))
-        x += parent_tile.width
+        x += source_tile.width
     return sheet
 
 
@@ -156,7 +169,7 @@ def region_strip(
     """One fragile region across the whole sequence.
 
     A redrawn eye, a weapon that changed angle or a gap that filled in is hard
-    to see against the frame's own parent, where the difference is small and
+    to see against the frame's own source, where the difference is small and
     expected. Against the frames either side it is obvious: everything moves
     smoothly except the one that does not. This is the view the numeric gates
     cannot give, because they measure silhouettes and not what is drawn inside.
@@ -206,11 +219,10 @@ def main() -> int:
     parser.add_argument("source_manifest", type=Path)
     parser.add_argument("frames", type=Path)
     parser.add_argument("output", type=Path, help="directory for comparisons and the report")
-    parser.add_argument("--parent-frame-manifest", type=Path)
     parser.add_argument(
         "--fragile-crops",
         action="store_true",
-        help="also render 4x crops of the fragile regions, parent over output",
+        help="also render 4x crops of the fragile regions, source over output",
     )
     parser.add_argument(
         "--region-strips",
@@ -254,15 +266,6 @@ def main() -> int:
 
     manifest = json.loads(args.source_manifest.read_text())
     source_dir = Path(manifest["sourceFramesDirectory"])
-    parents: dict[int, Path] = {}
-    if args.parent_frame_manifest:
-        parent_manifest = json.loads(args.parent_frame_manifest.read_text())
-        parent_dir = Path(parent_manifest["parentFramesDirectory"])
-        parents = {
-            int(r["outputFrame"]): parent_dir / str(r["parentFile"])
-            for r in parent_manifest.get("frameMapping", [])
-        }
-
     comparisons = args.output / "comparisons"
     records: list[dict[str, object]] = []
     missing: list[int] = []
@@ -286,15 +289,13 @@ def main() -> int:
         panels: list[tuple[str, Image.Image]] = []
         if source_path.is_file():
             panels.append((f"native {record.get('nativeFrame')}", Image.open(source_path).convert("RGB")))
-        parent_path = parents.get(index)
-        if parent_path is not None and parent_path.is_file():
-            panels.append((f"parent {index:03d}", on_checker(parent_path)))
         panels.append((f"output {index:03d}", on_checker(output_path)))
+        panels.append((f"output {index:03d} on black", on_black(output_path)))
 
         artifact = comparisons / f"frame-{index:03d}.png"
         comparison(panels, artifact)
-        if args.fragile_crops and parent_path is not None and parent_path.is_file():
-            strip = fragile_strip(parent_path, output_path, index)
+        if args.fragile_crops and source_path.is_file():
+            strip = fragile_strip(source_path, output_path, index)
             strip_path = args.output / "fragile" / f"frame-{index:03d}.png"
             strip_path.parent.mkdir(parents=True, exist_ok=True)
             strip.save(strip_path)
@@ -310,10 +311,6 @@ def main() -> int:
             # A checksum cannot see a redrawn eye. These are for a reviewer.
             **{key: accepted(index) for key in JUDGEMENTS},
         }
-        if parent_path is not None and parent_path.is_file():
-            entry["parentSha256"] = sha256(parent_path)
-            entry["parentOutputComparisonArtifact"] = str(artifact.relative_to(args.output))
-            entry.update({key: accepted(index) for key in PARENT_JUDGEMENTS})
         records.append(entry)
 
     if args.region_strips:

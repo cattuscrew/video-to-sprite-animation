@@ -16,7 +16,6 @@ from delivery_policy import (
     delivery_mapping_errors,
     delivery_report_errors,
     mapping_manifest_errors,
-    parent_frame_manifest_errors,
     visual_qa_report_errors,
 )
 
@@ -48,7 +47,6 @@ def main() -> int:
     parser.add_argument("delivery_report", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--source-correspondence-report", type=Path)
-    parser.add_argument("--parent-frame-manifest", type=Path)
     parser.add_argument("--visual-qa-report", type=Path, required=True)
     args = parser.parse_args()
 
@@ -74,16 +72,6 @@ def main() -> int:
     )
     errors.extend(delivery_report_errors(delivery_report, authority))
     errors.extend(delivery_mapping_errors(delivery_report, mapping))
-    if authority.get("processingMode") == "gpt-image-alpha-repair":
-        if not args.parent_frame_manifest:
-            errors.append("alpha repair delivery requires --parent-frame-manifest")
-        else:
-            parent_manifest = load_json(
-                args.parent_frame_manifest, "parent-frame manifest", errors
-            )
-            errors.extend(parent_frame_manifest_errors(parent_manifest, mapping))
-    elif args.parent_frame_manifest:
-        errors.append("parent-frame manifest is valid only for alpha repair delivery")
     errors.extend(visual_qa_report_errors(visual_qa_report))
     artifacts = visual_qa_report.get("artifacts", {})
     if isinstance(artifacts, dict):
