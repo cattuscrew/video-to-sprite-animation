@@ -128,27 +128,37 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class SlowPreviewTests(QaArtifactTests):
-    """The slow preview is for watching motion, so it is a GIF: it loops by
-    itself in any viewer, where an MP4 has to be opened and replayed by hand."""
+class GifPreviewTests(QaArtifactTests):
+    """The GIF is the normal-speed preview: it loops by itself wherever it is
+    opened, where an MP4 has to be played and replayed by hand."""
 
-    def test_the_slow_preview_is_a_gif_and_the_exact_one_is_not(self) -> None:
-        report, _ = self.build()
-        self.assertTrue(report["artifacts"]["slowPreview"].endswith(".gif"))
-        # Timing is judged on the exact-FPS preview, and GIF delays are whole
-        # centiseconds, so 24fps would become 25.
-        self.assertTrue(report["artifacts"]["exactFpsPreview"].endswith(".mp4"))
+    def test_the_gif_plays_at_normal_speed_and_loops(self) -> None:
+        _, root = self.build()
+        found = list(root.rglob("preview.gif"))
+        self.assertEqual(len(found), 1, found)
+        gif = Image.open(found[0])
+        self.assertEqual(gif.info.get("loop"), 0)
+
+    def test_the_gif_holds_its_loop_length_despite_centisecond_delays(self) -> None:
+        """24fps is 41.67ms a frame, which GIF cannot store. A uniform 40ms
+        runs 4% fast; distributing the rounding keeps the loop its true length."""
+        from build_qa_artifacts import gif_delays
+
+        for fps, count in ((24.0, 48), (12.0, 24), (30.0, 60)):
+            with self.subTest(fps=fps):
+                delays = gif_delays(count, fps)
+                self.assertEqual(len(delays), count)
+                self.assertAlmostEqual(sum(delays) / 1000.0, count / fps, places=3)
+                self.assertTrue(all(d % 10 == 0 and d >= 10 for d in delays))
+
+    def test_the_gif_is_composited_on_black(self) -> None:
+        """Matching the exact-FPS MP4, so an edge reads the same way in both."""
+        _, root = self.build()
+        gif = Image.open(next(iter(root.rglob("preview.gif"))))
+        gif.seek(0)
+        corner = np.asarray(gif.convert("RGB"))[0, 0]
+        self.assertTrue((corner < 8).all(), f"corner was {corner}, expected black")
 
     def test_no_slow_mp4_is_written(self) -> None:
         _, root = self.build()
         self.assertEqual(list(root.rglob("preview-slow.mp4")), [])
-
-    def test_the_slow_gif_is_composited_on_black(self) -> None:
-        """Matching the exact-FPS MP4, so an edge reads the same way in both."""
-        _, root = self.build()
-        found = list(root.rglob("preview-slow.gif"))
-        self.assertEqual(len(found), 1, found)
-        gif = Image.open(found[0])
-        gif.seek(0)
-        corner = np.asarray(gif.convert("RGB"))[0, 0]
-        self.assertTrue((corner < 8).all(), f"corner was {corner}, expected black")

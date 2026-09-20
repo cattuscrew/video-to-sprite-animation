@@ -65,6 +65,25 @@ def on_checker(path: Path) -> Image.Image:
     return board.convert("RGB")
 
 
+def gif_delays(count: int, fps: float) -> list[int]:
+    """Whole-millisecond delays (GIF stores centiseconds) totalling count/fps.
+
+    Each delay is rounded to a centisecond, and the running error decides which
+    frames take the longer one, so the rounding never accumulates.
+    """
+    delays: list[int] = []
+    target = 1000.0 / fps
+    elapsed = 0.0
+    written = 0
+    for index in range(1, count + 1):
+        elapsed += target
+        want = int(round((elapsed - written) / 10.0)) * 10
+        want = max(10, want)
+        delays.append(want)
+        written += want
+    return delays
+
+
 def write_gif(
     paths: list[Path],
     output: Path,
@@ -80,6 +99,13 @@ def write_gif(
     `background="black"` for a preview meant for watching motion: a sprite
     moving over a static checkerboard is hard to read, and black is what the
     exact-FPS MP4 uses, so both previews show an edge the same way.
+
+    GIF frame delays are whole centiseconds, and most frame rates are not: at
+    24fps a frame is 41.67ms, so a uniform delay of 40ms runs the loop 4% fast
+    and 50ms runs it 20% slow. Instead the delays are distributed so the total
+    duration is right -- 48 frames at 24fps become forty 40ms frames and eight
+    50ms frames, which is exactly 2.000s. The loop then holds its length, and
+    the 10ms difference on one frame in six is far below what anyone sees.
     """
     render = on_black if background == "black" else on_checker
     frames = [render(path) for path in paths]
@@ -89,7 +115,7 @@ def write_gif(
         output,
         save_all=True,
         append_images=frames[1:],
-        duration=max(1, int(round(1000.0 / fps))),
+        duration=gif_delays(len(frames), fps),
         disposal=2,
         **options,
     )
@@ -359,10 +385,10 @@ def main() -> int:
         flagged = numbers[:: max(1, len(numbers) // 6)]
 
     args.output.mkdir(parents=True, exist_ok=True)
-    exact_gif = args.output / "preview-exact-fps.gif"
+    exact_gif = args.output / "preview.gif"
     slow_gif = args.output / "preview-slow.gif"
     loops = args.loop_type != "one-shot"
-    write_gif(paths, exact_gif, args.fps, loops)
+    write_gif(paths, exact_gif, args.fps, loops, background="black")
     write_gif(
         paths,
         slow_gif,
