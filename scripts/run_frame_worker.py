@@ -204,7 +204,13 @@ def main() -> int:
         "exec",
         "--json",
         "--skip-git-repo-check",
-        "--ephemeral",
+        # Not --ephemeral. The image tool resolves its referenced paths against
+        # the session, and an ephemeral one has nothing to resolve against: it
+        # rejects every absolute path with "AbsolutePathBuf deserialized without
+        # a base path" and the turn then completes carrying that failure as
+        # prose, so it reads as success unless the image is checked for.
+        "-C",
+        str(args.run.resolve()),
         "-s",
         "read-only",
         "-c",

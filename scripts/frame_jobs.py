@@ -91,7 +91,12 @@ def budgets(run: Path) -> dict[str, int]:
 
 def spent(records: list[dict]) -> dict[str, int]:
     return {
-        "safetyBlock": sum(1 for r in records if r.get("errorClass") == MODERATION),
+        # A tool error is transient enough to retry and expensive enough to
+        # bound: counted here, a broken request stops after four attempts
+        # instead of looping until someone notices.
+        "safetyBlock": sum(
+            1 for r in records if r.get("errorClass") in (MODERATION, TOOL_ERROR)
+        ),
         "quality": sum(1 for r in records if r.get("errorClass") == QUALITY),
     }
 
@@ -114,6 +119,32 @@ def pause_until(run: Path) -> float | None:
     return max(resets) if resets else None
 
 
+def resolve_source_directory(
+    manifest: dict, manifest_path: Path, override: Path | None = None
+) -> Path:
+    """Where the native frames live.
+
+    A parent manifest names each source frame but keeps the directory in the
+    source manifest it points at. Read only the first and every job gets a bare
+    filename, which the image tool rejects outright.
+    """
+    if override:
+        return override
+    direct = manifest.get("sourceFramesDirectory")
+    if direct and Path(direct).is_dir():
+        return Path(direct)
+    linked = manifest.get("sourceFrameManifest")
+    if linked:
+        path = Path(linked)
+        if not path.is_absolute():
+            path = manifest_path.parent / path
+        if path.is_file():
+            nested = read_json(path).get("sourceFramesDirectory")
+            if nested and Path(nested).is_dir():
+                return Path(nested)
+    return Path("")
+
+
 # --------------------------------------------------------------------------- init
 
 
@@ -125,9 +156,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     mode = manifest.get("processingMode") or "gpt-image-per-frame-edit"
     parent_dir = Path(manifest.get("parentFramesDirectory", ""))
-    source_dir = Path(manifest.get("sourceFramesDirectory", ""))
-    if not source_dir.is_absolute() and args.source_frames:
-        source_dir = args.source_frames
+    source_dir = resolve_source_directory(manifest, args.manifest, args.source_frames)
 
     created = 0
     for record in mapping:
@@ -159,6 +188,17 @@ def cmd_init(args: argparse.Namespace) -> int:
         if args.color_reference:
             job["colorReference"] = str(args.color_reference)
             job["colorReferenceSha256"] = sha256(args.color_reference)
+        unresolved = [
+            f"{key}={job[key]}"
+            for key in ("authority", "sourceFile", "parentFile")
+            if job.get(key) and not Path(job[key]).is_file()
+        ]
+        if unresolved:
+            raise SystemExit(
+                f"frame {frame}: job inputs do not resolve to files on disk: "
+                f"{', '.join(unresolved)}. A worker cannot open these, and the "
+                "image tool rejects a path it cannot resolve."
+            )
         write_json(job_path, job)
         created += 1
 

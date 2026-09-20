@@ -104,7 +104,26 @@ def main() -> None:
     parser.add_argument("output", type=Path, help="frame-contract.json")
     parser.add_argument("--canvas", type=parse_pair, default=(512, 512))
     parser.add_argument("--pivot", type=parse_pair, default=(256, 492))
-    parser.add_argument("--scale-tolerance", type=float, default=0.03)
+    parser.add_argument(
+        "--scale-tolerance",
+        type=float,
+        default=0.03,
+        help=(
+            "permitted visible-size ratio deviation from the master. Must cover "
+            "the authority sequence's own variation: an idle animation whose "
+            "arms move changes visible width by several percent, and a tolerance "
+            "tighter than that rejects the approved animation rather than the repair."
+        ),
+    )
+    parser.add_argument(
+        "--pivot-tolerance",
+        type=int,
+        default=1,
+        help=(
+            "permitted contact-pivot deviation in pixels. Must likewise cover the "
+            "authority's own sway; measure it rather than assuming the default."
+        ),
+    )
     parser.add_argument(
         "--processing-mode",
         choices=(
@@ -305,7 +324,7 @@ def main() -> None:
             "maximumLoopSeamRatio": args.max_seam_ratio,
         },
         "tolerances": {
-            "pivotPixels": 1,
+            "pivotPixels": args.pivot_tolerance,
             "visibleScaleRatio": args.scale_tolerance,
             "paletteMeanAbsolute": 0.08,
             "edgeDensityAbsolute": 0.08,
