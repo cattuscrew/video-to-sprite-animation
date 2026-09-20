@@ -98,6 +98,33 @@ class QaArtifactTests(unittest.TestCase):
         self.assertEqual(report["missingFrames"], [3])
         self.assertEqual(report["frameCount"], FRAME_COUNT - 1)
 
+    def test_only_the_named_checks_are_recorded(self) -> None:
+        report, _ = self.build("--reviewed", "onionSkin,triplets")
+        self.assertTrue(report["onionSkinReviewed"])
+        self.assertTrue(report["tripletsReviewed"])
+        self.assertFalse(report["normalSpeedReviewed"])
+        self.assertEqual(report["status"], "pending-review")
+        self.assertIn("normalSpeed", report["outstandingChecks"])
+
+    def test_all_checks_named_accepts_the_report(self) -> None:
+        report, _ = self.build(
+            "--reviewed",
+            "normalSpeed,slowSpeed,triplets,onionSkin,sourceOutputPairs,"
+            "sourceMotion,topologyAndLandmarks",
+        )
+        self.assertEqual(report["status"], "accepted")
+        self.assertEqual(report["outstandingChecks"], [])
+
+    def test_a_missing_frame_blocks_acceptance_even_when_all_checks_are_named(self) -> None:
+        report, _ = self.build(
+            "--reviewed",
+            "normalSpeed,slowSpeed,triplets,onionSkin,sourceOutputPairs,"
+            "sourceMotion,topologyAndLandmarks",
+            drop=3,
+        )
+        self.assertEqual(report["status"], "pending-review")
+        self.assertEqual(report["missingFrames"], [3])
+
 
 if __name__ == "__main__":
     unittest.main()

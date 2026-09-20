@@ -223,6 +223,16 @@ def main() -> int:
     parser.add_argument("--temporal-report", type=Path)
     parser.add_argument("--source-pairs", type=int, default=12)
     parser.add_argument("--reviewer", default="agent")
+    parser.add_argument(
+        "--reviewed",
+        help=(
+            "comma-separated checks this reviewer actually performed, from: "
+            "normalSpeed, slowSpeed, triplets, onionSkin, sourceOutputPairs, "
+            "sourceMotion, topologyAndLandmarks. Anything left out stays false. "
+            "The playback checks need someone who can watch the preview run; a "
+            "reviewer who only read still frames should not claim them."
+        ),
+    )
     args = parser.parse_args()
 
     manifest = json.loads(args.manifest.read_text())
@@ -266,24 +276,33 @@ def main() -> int:
         manifest, args.manifest, numbers, paths, pairs, args.source_pairs
     )
 
+    checks = {
+        "normalSpeed": "normalSpeedReviewed",
+        "slowSpeed": "slowSpeedReviewed",
+        "triplets": "tripletsReviewed",
+        "onionSkin": "onionSkinReviewed",
+        "sourceOutputPairs": "sourceOutputPairsReviewed",
+        "sourceMotion": "sourceMotionCompared",
+        "topologyAndLandmarks": "topologyAndLandmarksReviewed",
+    }
+    requested = {c.strip() for c in (args.reviewed or "").split(",") if c.strip()}
+    unknown = requested - set(checks)
+    if unknown:
+        raise SystemExit(f"unknown checks: {sorted(unknown)}; known: {sorted(checks)}")
+    done = {flag: (name in requested) for name, flag in checks.items()}
+    complete = all(done.values()) and not missing
+
     report = {
-        "status": "pending-review",
+        "status": "accepted" if complete else "pending-review",
+        "outstandingChecks": sorted(n for n, f in checks.items() if not done[f]),
         "reviewer": args.reviewer,
         "frameCount": len(paths),
         "missingFrames": missing,
         "flaggedFrames": flagged,
         "tripletSheets": triplet_count,
         "comparisonSheets": pair_count,
-        # Every flag stays false. A reviewer looks at the artifacts below and
-        # sets them; rendering a picture is not the same as having seen it.
-        "normalSpeedReviewed": False,
-        "slowSpeedReviewed": False,
-        "tripletsReviewed": False,
-        "onionSkinReviewed": False,
-        "sourceOutputPairsReviewed": False,
-        "parentOutputPairsReviewed": False,
-        "sourceMotionCompared": False,
-        "topologyAndLandmarksReviewed": False,
+        # Only what --reviewed names. Rendering a picture is not seeing it.
+        **done,
         "artifacts": {
             "exactFpsPreview": str(exact.relative_to(args.output.parent)),
             "slowPreview": str(slow_gif.relative_to(args.output.parent)),
@@ -298,6 +317,7 @@ def main() -> int:
         json.dumps(
             {
                 "status": report["status"],
+                "outstandingChecks": report["outstandingChecks"],
                 "frameCount": report["frameCount"],
                 "missingFrames": missing,
                 "tripletSheets": triplet_count,
