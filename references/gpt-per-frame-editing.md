@@ -47,6 +47,22 @@ The built-in image tool takes three arguments: a prompt, referenced image paths,
 
 - The returned canvas is not the canvas you supplied. A 720x720 input came back 1254x1254, so every output is resampled on the way back and internal outlines differ from the source even when nothing was redrawn.
 - The soft edge it returns is straight-alpha and already unmixed: its partial-alpha pixels hold the artwork's own colour, not the background's. On the reference source only 0.65-1.5% of edge pixels were background-coloured. Unmixing the whole edge against the screen colour drives a dark keyline's green negative and leaves a magenta fringe -- worse than what it set out to fix. Measure before treating an edge.
+- About a third of edits come back re-illustrated rather than cut out. Measured
+  over 120 attempts on a 48-frame batch: 25% accepted, 40% moderation-blocked,
+  35% rejected for geometry. The rejected ones are internally clean sprites --
+  correct pose, correct colours, no halo -- but the character is drawn 17% to
+  34% larger than it is in its own source frame, with a per-quadrant shift
+  spread of 1.5 to 2.5px against 0.14px for accepted ones. The separation is
+  total: no rejected frame overlaps the accepted range on either measure.
+  Nothing that looks at a frame on its own can see this, because the frame is
+  self-consistent; only measuring it against its own source can. Asking the
+  prompt not to enlarge does not prevent it -- retry and reject does.
+- Because of that rate, a frame needs about four attempts on average. Retry
+  budgets of 4 safety / 2 quality blocked a third of a batch on the quality
+  budget alone while the frames themselves were fine.
+- The 429 usage-limit body carries `resets_at` as an epoch integer. The prose
+  form ("try again at 6:20 PM") appears only in some messages, so parse both or
+  the queue knows it is paused without knowing until when.
 - The saved file lands in the session's own image directory, and the path is reported in prose rather than as a field. Bind it by the session id and the item id, never by "the newest file".
 - Roughly two requests in five fail with an HTTP 400 `moderation_blocked` at the output stage on ordinary sprite art. It is not deterministic: the same prompt and input often pass on the next attempt, and a much shorter prompt helps. A block costs a full generation, so budget for it.
 - Calls within one session are serialised by the host even when issued together, and a combined call discards its siblings' results when one fails. Issue one call per attempt with its own error handling, and get concurrency from separate worker processes instead.

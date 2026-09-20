@@ -37,7 +37,10 @@ USAGE_LIMIT = "usage_limit_reached"
 WORKER_DIED = "worker_died"
 TOOL_ERROR = "tool_error"
 
-DEFAULT_BUDGETS = {"safetyBlock": 4, "quality": 2}
+# Measured over 120 attempts: 25% accepted, so a frame needs about four tries.
+# At 4 and 2 a third of a batch blocked on the quality budget with nothing
+# wrong with the frames.
+DEFAULT_BUDGETS = {"safetyBlock": 6, "quality": 6}
 
 
 def sha256(path: Path) -> str:

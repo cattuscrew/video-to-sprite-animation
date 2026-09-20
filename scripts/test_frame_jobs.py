@@ -119,13 +119,15 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(self.ready_frames(), [1, 2, 3, 4])
 
     def test_budgets_are_counted_separately(self) -> None:
-        for attempt in range(1, 5):
+        safety = frame_jobs.DEFAULT_BUDGETS["safetyBlock"]
+        quality = frame_jobs.DEFAULT_BUDGETS["quality"]
+        for attempt in range(1, safety + 1):
             record_attempt(self.run, 1, attempt, error_class=frame_jobs.MODERATION)
-        for attempt in range(1, 3):
+        for attempt in range(1, quality + 1):
             record_attempt(self.run, 2, attempt, error_class=frame_jobs.QUALITY)
         ready = self.ready_frames()
-        self.assertNotIn(1, ready, "four safety blocks should exhaust that budget")
-        self.assertNotIn(2, ready, "two quality failures should exhaust that budget")
+        self.assertNotIn(1, ready, "spending the safety budget should exhaust it")
+        self.assertNotIn(2, ready, "spending the quality budget should exhaust it")
         self.assertIn(3, ready)
 
     def test_safety_blocks_do_not_spend_the_quality_budget(self) -> None:
@@ -211,7 +213,7 @@ class StatusTests(unittest.TestCase):
         self.assertEqual([f["outputFrame"] for f in report["frames"]], [1, 2, 3, 4])
 
     def test_exhausted_frames_are_blocked_not_silently_dropped(self) -> None:
-        for attempt in range(1, 5):
+        for attempt in range(1, frame_jobs.DEFAULT_BUDGETS["safetyBlock"] + 1):
             record_attempt(self.run, 2, attempt, error_class=frame_jobs.MODERATION)
         report = self.status()
         second = next(f for f in report["frames"] if f["outputFrame"] == 2)
