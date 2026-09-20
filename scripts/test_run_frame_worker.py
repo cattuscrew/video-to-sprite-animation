@@ -157,6 +157,24 @@ class ResetTimeTests(unittest.TestCase):
 class BriefTests(unittest.TestCase):
     TEMPLATE = Path(__file__).resolve().parent.parent / "references" / "worker-brief.md"
 
+    def test_an_approved_colour_reference_is_sent_as_image_two(self) -> None:
+        """A reference recorded in the manifest but never sent guides nothing:
+        that is how a batch drifted in colour with every gate passing."""
+        brief = build_brief(
+            {
+                "outputFrame": 24,
+                "nativeFrame": 177,
+                "authority": "/run/source/frame-024.png",
+                "colorReference": "/run/source/frame-001.png",
+            },
+            "EXTRACTION PROMPT",
+            self.TEMPLATE.read_text(),
+        )
+        self.assertIn("Image 1: /run/source/frame-024.png", brief)
+        self.assertIn("Image 2: /run/source/frame-001.png", brief)
+        self.assertIn("appearance", brief.lower())
+        self.assertIn("not a pose", brief)
+
     def test_the_brief_sends_one_image_only(self) -> None:
         """No second lineage means no second image, and no chance of sending
         the wrong one as the edit target."""
@@ -172,6 +190,7 @@ class BriefTests(unittest.TestCase):
         )
         self.assertIn("Image 1: /run/source/frame-024.png", brief)
         self.assertNotIn("Image 2:", brief)
+        self.assertNotIn("colour reference", brief)
         self.assertIn("EXTRACTION PROMPT", brief)
         self.assertIn("output frame 24", brief)
 
@@ -189,6 +208,7 @@ class BriefTests(unittest.TestCase):
         )
         self.assertIn("Image 1: /run/source/frame-003.png", brief)
         self.assertNotIn("Image 2:", brief)
+        self.assertNotIn("colour reference", brief)
 
     def test_the_brief_forbids_the_worker_judging_its_own_output(self) -> None:
         text = self.TEMPLATE.read_text()

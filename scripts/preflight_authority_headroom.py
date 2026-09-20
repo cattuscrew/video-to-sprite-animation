@@ -40,6 +40,7 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
+from register_to_authority import erode
 from source_foreground import foreground_mask
 
 # How much of the limit the authority's own motion is allowed to use before the
@@ -58,6 +59,12 @@ def measure(path: Path) -> dict[str, object]:
     if xs.size == 0:
         return {}
     left, right, top, bottom = int(xs.min()), int(xs.max()), int(ys.min()), int(ys.max())
+    interior = erode(mask, 2)
+    colour = (
+        image[:, :, :3][interior].astype(np.float64).mean(axis=0)
+        if int(interior.sum()) >= 500
+        else None
+    )
     contact = mask[max(0, bottom - CONTACT_ROWS + 1) : bottom + 1]
     _, contact_xs = np.nonzero(contact)
     root = (
@@ -70,6 +77,7 @@ def measure(path: Path) -> dict[str, object]:
         "box": (right - left + 1, bottom - top + 1),
         "area": int(mask.sum()),
         "pivot": (root, float(bottom)),
+        "colour": colour,
     }
 
 
@@ -152,6 +160,16 @@ def main() -> int:
         if limit and worst > limit * HEADROOM_FRACTION:
             tight.append(measures[-1])
 
+    # The source's own colour variation, which is what a colour-stability limit
+    # has to be set from. An animation that genuinely shifts colour needs room;
+    # one that does not makes any output wobble obvious.
+    colours = [f["colour"] for _, f in frames if f["colour"] is not None]
+    colour_steps = (
+        np.abs(np.diff(np.array(colours), axis=0)).max(axis=1)
+        if len(colours) > 1
+        else np.array([0.0])
+    )
+
     pivot = [int(round(float(np.median(pivots[:, 0])))), int(round(float(pivots[:, 1].max())))]
     report = {
         "status": "accepted" if not tight and not missing else "review-needed",
@@ -160,6 +178,11 @@ def main() -> int:
         "missingFrames": missing,
         "measuredPivot": pivot,
         "pivotSpreadPixels": round(float(pivots[:, 0].max() - pivots[:, 0].min()), 3),
+        "sourceColourStep": {
+            "median": round(float(np.median(colour_steps)), 4),
+            "max": round(float(colour_steps.max()), 4),
+            "suggestedLimit": round(max(1.0, float(colour_steps.max()) * 3.0), 2),
+        },
         "headroomFraction": HEADROOM_FRACTION,
         "measures": measures,
         "tightTransitions": tight,
@@ -173,7 +196,12 @@ def main() -> int:
             f"{item['limit']:<44}{item['authorityMax']:>14.3f}"
             f"{item['limitValue']:>10.3f}{item['usedFraction']:>7.0%}"
         )
-    print(f"\nmeasured ground-contact pivot: {pivot[0]}, {pivot[1]}")
+    print(
+        f"\nsource colour step between frames: median "
+        f"{np.median(colour_steps):.2f}  max {colour_steps.max():.2f} levels"
+        f"  -> suggested colour limit {max(1.0, colour_steps.max() * 3.0):.2f}"
+    )
+    print(f"measured ground-contact pivot: {pivot[0]}, {pivot[1]}")
     if missing:
         print(f"missing source frames: {missing}")
     if tight:

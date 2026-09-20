@@ -55,12 +55,23 @@ def sha256(path: Path) -> str:
 
 
 def build_brief(job: dict, prompt: str, template: str) -> str:
-    # One image: the frame's own mapped native source. There is no second
-    # lineage, so there is no second path to get the order of wrong.
+    # Image 1 is always the frame's own mapped native source. Image 2, when the
+    # run approved one, is the colour reference -- appearance only, never a
+    # second pose source. A reference recorded in the manifest but never sent
+    # guides nothing, which is how a whole batch once drifted in colour.
     inputs = [job["authority"]]
+    if job.get("colorReference"):
+        inputs.append(job["colorReference"])
     paths = "\n".join(
         f"  Image {n}: {path}" for n, path in enumerate(inputs, start=1)
     )
+    if len(inputs) > 1:
+        paths += (
+            "\n\nImage 2 is the approved colour reference, and it is "
+            "appearance only: use it to keep palette and material colours "
+            "consistent with the rest of the batch. It is not a pose, "
+            "silhouette, geometry, scale or framing source."
+        )
     return template.format(
         output_frame=job["outputFrame"],
         native_frame=job.get("nativeFrame"),
