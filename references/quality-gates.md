@@ -58,6 +58,8 @@ For GPT per-frame editing, compare each output first with its exact mapped sourc
 
 For GPT alpha repair, compare in this order: approved parent/output for foreground identity, exact source/output for pose correspondence, then previous/current/next outputs for temporal stability. Reject canvas-size changes, zoom, recentering, parent foreground redraw, material-color changes, or line changes even if the new alpha looks cleaner.
 
+Prepare the review with `scripts/build_pose_correspondence.py`. It renders a full-resolution comparison per frame and fills in the native frame, both digests and the artifact link; it leaves every judgement false. Whether a silhouette survived, whether the eyes are still two dots, whether the sword sits at the same angle -- no checksum sees any of that, which is why the gate asks a reviewer. Accepting a review of 46 frames does not accept 48: a missing frame keeps the report pending.
+
 The GPT pose-correspondence record for every frame must explicitly accept silhouette, topology, equipment geometry, eye state, and negative spaces, and link the rendered full-frame source/output comparison used for that judgment. A generic `sourcePosePreserved` boolean is insufficient.
 
 Also compare stable material regions against the approved canonical color reference. Record per-region robust color statistics for hair, skin, primary garment, leather, wood, and metal when present. Aggregate palette means alone are insufficient: reject visible regional hue/value flicker even when the global mean passes.
