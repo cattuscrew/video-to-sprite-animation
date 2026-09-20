@@ -82,12 +82,85 @@ def comparison(panels: list[tuple[str, Image.Image]], destination: Path) -> None
     sheet.save(destination)
 
 
+FRAGILE_REGIONS = {
+    # Fractions of the visible bounding box. quality-gates.md names these as the
+    # places a repair fails first: gaps that should stay open, thin geometry, and
+    # boundaries between materials.
+    "head-chin-collar": (0.20, 0.00, 0.85, 0.32),
+    "hands-and-weapon": (0.00, 0.35, 0.55, 0.70),
+    "equipment-edge": (0.50, 0.30, 1.00, 0.70),
+    "boots-groundline": (0.15, 0.78, 0.90, 1.00),
+}
+
+
+def visible_box(path: Path) -> tuple[int, int, int, int]:
+    alpha = Image.open(path).convert("RGBA").getchannel("A")
+    box = alpha.getbbox()
+    return box or (0, 0, alpha.width, alpha.height)
+
+
+def fragile_strip(
+    parent: Path, output: Path, frame: int, zoom: float = 1.6
+) -> Image.Image:
+    """Parent above, output below, one column per fragile region.
+
+    Magnified, because a halo two pixels wide is invisible at 100% and obvious
+    when enlarged -- and two pixels is the whole subject of an alpha repair.
+    Every tile is the same size and the two rows line up, so the eye compares
+    the pair rather than hunting for it.
+    """
+    left, top, right, bottom = visible_box(parent)
+    width, height = right - left, bottom - top
+    parent_image = on_checker(parent)
+    output_image = on_checker(output)
+
+    columns: list[tuple[str, Image.Image, Image.Image]] = []
+    for name, (x0, y0, x1, y1) in FRAGILE_REGIONS.items():
+        box = (
+            left + int(x0 * width),
+            top + int(y0 * height),
+            left + int(x1 * width),
+            top + int(y1 * height),
+        )
+        pair = []
+        for source in (parent_image, output_image):
+            patch = source.crop(box)
+            patch = patch.resize(
+                (max(1, int(patch.width * zoom)), max(1, int(patch.height * zoom))),
+                Image.NEAREST,
+            )
+            pair.append(patch)
+        columns.append((name, pair[0], pair[1]))
+
+    label_height = 16
+    row_height = max(c[1].height for c in columns)
+    sheet = Image.new(
+        "RGB",
+        (sum(c[1].width for c in columns), label_height * 3 + row_height * 2),
+        (24, 24, 24),
+    )
+    draw = ImageDraw.Draw(sheet)
+    draw.text((4, 3), f"frame {frame:03d}   parent (upper) / output (lower)", fill="white")
+    x = 0
+    for name, parent_tile, output_tile in columns:
+        draw.text((x + 4, label_height + 1), name, fill="#9ad")
+        sheet.paste(parent_tile, (x, label_height * 2))
+        sheet.paste(output_tile, (x, label_height * 2 + row_height + label_height))
+        x += parent_tile.width
+    return sheet
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_manifest", type=Path)
     parser.add_argument("frames", type=Path)
     parser.add_argument("output", type=Path, help="directory for comparisons and the report")
     parser.add_argument("--parent-frame-manifest", type=Path)
+    parser.add_argument(
+        "--fragile-crops",
+        action="store_true",
+        help="also render 4x crops of the fragile regions, parent over output",
+    )
     parser.add_argument(
         "--accept",
         metavar="REVIEWER",
@@ -163,6 +236,11 @@ def main() -> int:
 
         artifact = comparisons / f"frame-{index:03d}.png"
         comparison(panels, artifact)
+        if args.fragile_crops and parent_path is not None and parent_path.is_file():
+            strip = fragile_strip(parent_path, output_path, index)
+            strip_path = args.output / "fragile" / f"frame-{index:03d}.png"
+            strip_path.parent.mkdir(parents=True, exist_ok=True)
+            strip.save(strip_path)
 
         entry: dict[str, object] = {
             "outputFrame": index,
