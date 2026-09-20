@@ -224,6 +224,16 @@ def main() -> int:
     parser.add_argument("--source-pairs", type=int, default=12)
     parser.add_argument("--reviewer", default="agent")
     parser.add_argument(
+        "--review-method",
+        default="played-back",
+        help=(
+            "how the motion checks were performed: 'played-back' when a "
+            "reviewer watched the preview run, or a named alternative such as "
+            "'frame-transition-analysis' when it was judged from per-transition "
+            "motion rather than from playback. Recorded verbatim."
+        ),
+    )
+    parser.add_argument(
         "--reviewed",
         help=(
             "comma-separated checks this reviewer actually performed, from: "
@@ -263,9 +273,15 @@ def main() -> int:
     slow_gif = args.output / "preview-slow.gif"
     write_gif(paths, exact_gif, args.fps)
     write_gif(paths, slow_gif, max(1.0, args.fps / args.slow_factor))
+    # GIF frame delays are whole centiseconds, so 24fps becomes 25 and the
+    # "exact FPS" preview is not exact. Prefer MP4 for both when ffmpeg exists.
     exact = exact_gif
     if write_mp4(paths, args.output / "preview-exact-fps.mp4", args.fps):
         exact = args.output / "preview-exact-fps.mp4"
+    slow = slow_gif
+    slow_fps = max(1.0, args.fps / args.slow_factor)
+    if write_mp4(paths, args.output / "preview-slow.mp4", slow_fps):
+        slow = args.output / "preview-slow.mp4"
 
     onion = args.output / "alpha-onion-sheet.png"
     onion_sheet(paths, onion)
@@ -295,6 +311,7 @@ def main() -> int:
     report = {
         "status": "accepted" if complete else "pending-review",
         "outstandingChecks": sorted(n for n, f in checks.items() if not done[f]),
+        "motionReviewMethod": args.review_method,
         "reviewer": args.reviewer,
         "frameCount": len(paths),
         "missingFrames": missing,
@@ -305,7 +322,7 @@ def main() -> int:
         **done,
         "artifacts": {
             "exactFpsPreview": str(exact.relative_to(args.output.parent)),
-            "slowPreview": str(slow_gif.relative_to(args.output.parent)),
+            "slowPreview": str(slow.relative_to(args.output.parent)),
             "triplets": str(triplets.relative_to(args.output.parent)),
             "onionSkin": str(onion.relative_to(args.output.parent)),
             "sourceMotionComparison": str(pairs.relative_to(args.output.parent)),

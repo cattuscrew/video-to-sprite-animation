@@ -36,6 +36,10 @@ Reject or repair a frame when:
 
 ## Sequence inspection
 
+Motion checks need motion. Watching the exact-FPS preview is the direct way; where that is not possible, per-transition analysis is the substitute: a hitch is a transition whose motion collapses toward zero, a jump is one that separates, and both are visible in a silhouette differenced against the frame before it. Record which was done in `motionReviewMethod`, because "reviewed" without a method is the claim this gate exists to stop.
+
+Prefer MP4 for both previews. GIF frame delays are whole centiseconds, so 24fps becomes 25 and an "exact FPS" preview is not exact.
+
 Render the artifacts before judging: `scripts/build_qa_artifacts.py` writes the exact-FPS preview, the slowed preview, triplets for the flagged frames, a whole-batch onion sheet, and per-frame comparisons against both the approved parent and the mapped native frame. It sets every reviewed flag false, because rendering a picture is not the same as having seen it. A reviewer sets them; the delivery gate then checks each named artifact exists.
 
 Inspect at normal speed, slow speed, and as previous/current/next triplets. Use:
