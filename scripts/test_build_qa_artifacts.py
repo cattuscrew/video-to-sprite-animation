@@ -28,7 +28,7 @@ def write(path: Path, left: int, opaque: bool = True) -> None:
 
 
 class QaArtifactTests(unittest.TestCase):
-    def build(self, drop: int | None = None) -> tuple[dict, Path]:
+    def build(self, *extra: str, drop: int | None = None) -> tuple[dict, Path]:
         self._directory = tempfile.TemporaryDirectory()
         root = Path(self._directory.name)
         source, parents, frames = root / "source", root / "parents", root / "frames"
@@ -64,7 +64,7 @@ class QaArtifactTests(unittest.TestCase):
         subprocess.run(
             [
                 sys.executable, str(SCRIPT), str(manifest), str(frames),
-                str(root / "qa" / "artifacts"), "--fps", "24",
+                str(root / "qa" / "artifacts"), "--fps", "24", *extra,
             ],
             capture_output=True,
             text=True,
