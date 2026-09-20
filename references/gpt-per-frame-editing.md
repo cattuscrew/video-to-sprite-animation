@@ -56,3 +56,15 @@ The built-in image tool takes three arguments: a prompt, referenced image paths,
 - Calls within one session are serialised by the host even when issued together, and a combined call discards its siblings' results when one fails. Issue one call per attempt with its own error handling, and get concurrency from separate worker processes instead.
 - A usage-limit error ends the turn outright, with no closing message. Treat a turn that simply stops as a dead worker, not as a failed frame.
 - Always record the tool's error text, including any request id. A driver that logs only "attempt failed" destroys the one piece of evidence that distinguishes a random block from a real defect.
+
+## Headless workers
+
+`codex exec --json` runs a worker without a terminal and prints one JSON object per line. The events that matter:
+
+- `thread.started` carries `thread_id`, which names the session's own image directory under `$CODEX_HOME/generated_images/`. Bind each image by that id plus the item id; never take "the newest file".
+- `turn.completed` is the only evidence a turn finished. A turn that stops after `turn.started` did not finish, and that is what a usage limit looks like from outside.
+- `turn.failed` carries the error message, including the usage-limit text and its "try again at" time, which is machine-readable enough to pause a queue on.
+
+Flags a worker needs: `--ephemeral`, `--skip-git-repo-check`, `-s read-only`, `-c approval_policy="never"`, and `-c features.default_mode_request_user_input=false`, which is what stops a worker blocking on a question nobody will answer. Close its stdin. Unset `OPENAI_API_KEY` and `CODEX_API_KEY` so `credentialMode` stays honest. Give it a wall-clock kill: a worker that hangs is not a frame that failed.
+
+Concurrency belongs between worker processes, never inside one. Whether separate processes generate in parallel is a property of the account, so raise it from one only on measured evidence, and remember that quota, not wall-clock, was the binding constraint on 2026-09-20.
