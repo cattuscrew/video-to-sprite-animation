@@ -115,7 +115,6 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
                 errors.append("GPT Image batch execution is not explicitly approved")
             errors.extend(retry_budget_errors(approval))
             errors.extend(registration_policy_errors(authority))
-            errors.extend(edge_decontamination_errors(authority))
     else:
         if not authority.get("canonicalMaster"):
             errors.append("synthesized authority is missing canonicalMaster")
@@ -132,16 +131,6 @@ RETRY_BUDGET_KINDS = ("safetyBlock", "quality")
 
 REGISTRATION_POLICIES = {
     "translation-only-to-authority",
-    "not-applied",
-}
-
-MATTE_POLICIES = {
-    "never-exceeds-authority-support",
-    "unconstrained",
-}
-
-EDGE_DECONTAMINATION_POLICIES = {
-    "unmix-known-background",
     "not-applied",
 }
 
@@ -174,11 +163,11 @@ def retry_budget_errors(approval: dict[str, Any]) -> list[str]:
 
 
 def registration_policy_errors(authority: dict[str, Any]) -> list[str]:
-    """Registration and matte policy are optional, but must be declared honestly.
+    """Registration policy is optional, but must be declared honestly.
 
     Translation onto a frame's own authority is not per-frame recentering: the
-    offset is measured against that frame's approved parent or mapped source,
-    never against a neighbour, and never changes scale or rotation.
+    offset is measured against that frame's own mapped native frame, never
+    against a neighbour, and never changes scale or rotation.
     """
     errors: list[str] = []
     registration = authority.get("registrationPolicy")
@@ -195,50 +184,6 @@ def registration_policy_errors(authority: dict[str, Any]) -> list[str]:
             if not isinstance(limit, (int, float)) or isinstance(limit, bool) or limit <= 0:
                 errors.append("registrationPolicy maxPixels must be a positive number")
 
-    matte = authority.get("mattePolicy")
-    if matte is not None and matte not in MATTE_POLICIES:
-        errors.append(f"mattePolicy must be one of {sorted(MATTE_POLICIES)}")
-    return errors
-
-
-def edge_decontamination_errors(authority: dict[str, Any]) -> list[str]:
-    """The rim treatment must be declared, and name the colour it unmixes.
-
-    GPT Image returns a soft edge whose partial-alpha pixels still carry the
-    original background colour. Composited over anything dark that rim reads as
-    a coloured fringe, and no gate that compares an output with another output
-    can see it. Unmixing needs the background colour stated, so the declaration
-    carries it rather than leaving it to whatever the script defaults to.
-    """
-    policy = authority.get("edgeDecontamination")
-    if policy is None:
-        return []
-    if not isinstance(policy, dict):
-        return ["edgeDecontamination must be an object"]
-    errors: list[str] = []
-    kind = policy.get("type")
-    if kind not in EDGE_DECONTAMINATION_POLICIES:
-        return [
-            f"edgeDecontamination type must be one of "
-            f"{sorted(EDGE_DECONTAMINATION_POLICIES)}"
-        ]
-    if kind == "unmix-known-background":
-        colour = policy.get("backgroundColor")
-        if (
-            not isinstance(colour, (list, tuple))
-            or len(colour) != 3
-            or not all(
-                isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 255
-                for value in colour
-            )
-        ):
-            errors.append(
-                "edgeDecontamination backgroundColor must be three integers in 0-255"
-            )
-        if policy.get("measuredFrom") in (None, ""):
-            errors.append(
-                "edgeDecontamination must say where backgroundColor was measured"
-            )
     return errors
 
 

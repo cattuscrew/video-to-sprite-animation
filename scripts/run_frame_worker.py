@@ -51,9 +51,9 @@ def sha256(path: Path) -> str:
 
 
 def build_brief(job: dict, prompt: str, template: str) -> str:
+    # One image: the frame's own mapped native source. There is no second
+    # lineage, so there is no second path to get the order of wrong.
     inputs = [job["authority"]]
-    if job.get("editTarget") == "parent" and job.get("sourceFile"):
-        inputs.append(job["sourceFile"])
     paths = "\n".join(
         f"  Image {n}: {path}" for n, path in enumerate(inputs, start=1)
     )

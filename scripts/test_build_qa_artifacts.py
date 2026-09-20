@@ -31,11 +31,10 @@ class QaArtifactTests(unittest.TestCase):
     def build(self, *extra: str, drop: int | None = None) -> tuple[dict, Path]:
         self._directory = tempfile.TemporaryDirectory()
         root = Path(self._directory.name)
-        source, parents, frames = root / "source", root / "parents", root / "frames"
+        source, frames = root / "source", root / "frames"
         mapping = []
         for index in range(1, FRAME_COUNT + 1):
             write(source / f"frame-{index:03d}.png", 8 + index)
-            write(parents / f"frame-{index:03d}.png", 8 + index)
             if index != drop:
                 write(frames / f"frame-{index:03d}.png", 8 + index)
             mapping.append(
@@ -44,18 +43,16 @@ class QaArtifactTests(unittest.TestCase):
                     "outputFile": f"frame-{index:03d}.png",
                     "nativeFrame": 150 + index,
                     "sourceFile": f"frame-{index:03d}.png",
-                    "parentFile": f"frame-{index:03d}.png",
                 }
             )
         source_manifest = root / "source-frame-manifest.json"
         source_manifest.write_text(
             json.dumps({"sourceFramesDirectory": str(source), "frameMapping": mapping})
         )
-        manifest = root / "parent-frame-manifest.json"
+        manifest = root / "source-frame-manifest.json"
         manifest.write_text(
             json.dumps(
                 {
-                    "parentFramesDirectory": str(parents),
                     "sourceFrameManifest": str(source_manifest),
                     "frameMapping": mapping,
                 }

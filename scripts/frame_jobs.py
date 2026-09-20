@@ -119,25 +119,6 @@ def pause_until(run: Path) -> float | None:
     return max(resets) if resets else None
 
 
-def declared_background(run: Path) -> str | None:
-    """The background colour the run approved for rim unmixing, as "R,G,B".
-
-    Read from the authority manifest rather than defaulted in the script: a
-    wrong colour here does not fail loudly, it just leaves or adds a fringe, so
-    it has to be the number the user approved.
-    """
-    manifest = run / "authority-manifest.json"
-    if not manifest.is_file():
-        return None
-    policy = read_json(manifest).get("edgeDecontamination")
-    if not isinstance(policy, dict) or policy.get("type") != "unmix-known-background":
-        return None
-    colour = policy.get("backgroundColor")
-    if not isinstance(colour, (list, tuple)) or len(colour) != 3:
-        return None
-    return ",".join(str(int(value)) for value in colour)
-
-
 def resolve_source_directory(
     manifest: dict, manifest_path: Path, override: Path | None = None
 ) -> Path:
@@ -484,12 +465,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             "--record",
             str(directory / "check.json"),
         ]
-        # GPT Image returns a soft edge still carrying the original background
-        # colour. Unmix it here, against the colour the run declared, or the
-        # frame ships with a coloured fringe that only shows over something dark.
-        background = declared_background(args.run)
-        if background:
-            command += ["--background", background]
         registration = subprocess.run(command, capture_output=True, text=True)
         if registration.returncode != 0:
             record_path = directory / "record.json"

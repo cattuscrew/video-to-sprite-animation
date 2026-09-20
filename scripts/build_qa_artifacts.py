@@ -11,8 +11,8 @@ produced them, so the claim was the only thing on offer. This renders the five:
   motion;
 - previous/current/next triplets for whichever frames were flagged;
 - an onion sheet over the whole batch, where drift accumulates visibly;
-- each output beside the frames it answers to: the approved parent it was
-  edited from and the native frame that is still its pose authority.
+- each output beside the native frame it was edited from, on the checkerboard
+  and on black, because a coloured or ragged rim shows only against black.
 
 It renders; it does not judge. The report it writes leaves every reviewed flag
 false, and a reviewer sets them after looking. Writing them true here would
@@ -223,7 +223,7 @@ def triplet_sheets(numbers: list[int], paths: list[Path], flagged: list[int], ou
 def resolve_source_directory(manifest: dict, manifest_path: Path) -> Path | None:
     """Where the native frames live.
 
-    A parent manifest names the source frames per record but keeps the
+    A manifest may name the source files per record but keep the
     directory in the source manifest it points at, so follow that link rather
     than reporting no pairs and letting the gate pass on an empty folder.
     """
@@ -250,15 +250,8 @@ def comparison_sheets(
     output: Path,
     limit: int,
 ) -> int:
-    """Each output beside the frames it answers to.
-
-    For alpha repair that is two comparisons, not one: the approved parent it
-    was edited from, and the native frame that remains its pose authority. A
-    repair can hold its pose perfectly and still have redrawn the parent.
-    """
+    """Each output beside the native frame it answers to, and on black."""
     source_dir = resolve_source_directory(manifest, manifest_path)
-    parent_dir = manifest.get("parentFramesDirectory")
-    parent_dir = Path(parent_dir) if parent_dir else None
     records = {int(r["outputFrame"]): r for r in manifest.get("frameMapping", [])}
     output.mkdir(parents=True, exist_ok=True)
     step = max(1, len(numbers) // max(1, limit))
@@ -270,11 +263,8 @@ def comparison_sheets(
             source = source_dir / str(record.get("sourceFile", ""))
             if source.is_file():
                 panels.append((f"native {record.get('nativeFrame')}", Image.open(source).convert("RGB")))
-        if parent_dir is not None and record.get("parentFile"):
-            parent = parent_dir / str(record["parentFile"])
-            if parent.is_file():
-                panels.append((f"parent {number:03d}", on_checker(parent)))
         panels.append((f"output {number:03d}", on_checker(path)))
+        panels.append((f"output {number:03d} on black", on_black(path)))
         if len(panels) < 2:
             continue
         height = max(panel.height for _, panel in panels)

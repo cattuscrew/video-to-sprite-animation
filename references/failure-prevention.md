@@ -14,7 +14,7 @@ Reject one-to-one delivery when any selected frame is skipped, duplicated, reord
 
 Process every selected native frame individually with built-in GPT Image and review every source/output pair.
 
-For alpha-only repair of an already approved sequence, preserve a two-link chain: exact native source -> approved parent output -> repaired output. Bind every parent filename and SHA-256 in `parent-frame-manifest.json`. The parent is the edit target for foreground fidelity; the native source remains pose and motion authority. Never use one parent for another frame.
+There is one link, not two: exact native source -> output. Editing from an approved earlier output was removed because it bound every RGB gate to a comparison between two outputs, so a defect the earlier one carried scored zero on all of them. Re-edit from the native frames instead.
 
 ## Fix the background tool and credential boundary
 
@@ -30,7 +30,7 @@ Before source processing, ask exactly one unresolved choice and wait. Do not com
 
 For GPT Image, transparency proof, canonical color reference, color-consistency strategy, and batch execution are four separate gates. A generic “approve” applies only to the single question currently shown.
 
-An alpha-repair strategy change requires a new proof even when the parent sequence was previously approved. Show source/parent/output at full resolution and reject any zoom, redraw, placement change, or canvas change before asking for batch approval.
+Any strategy change requires a new proof. Show source/output at full resolution, on black as well as on checkerboard, and reject any zoom, redraw, placement change, or canvas change before asking for batch approval.
 
 ## Prevent independent-frame color drift
 
@@ -44,18 +44,18 @@ Inspect the full outline and named fragile regions: both sides under the chin, a
 
 ## Prevent late temporal failure
 
-Per-frame limits and sequence limits fail differently, and a frame can pass every per-frame gate while making the sequence fail. On the 2026-09-20 run all 48 frames passed alpha repair, and the temporal gate then failed on two transitions and five accelerations, discovered at minute 100 of 103.
+Per-frame limits and sequence limits fail differently, and a frame can pass every per-frame gate while making the sequence fail. On the 2026-09-20 run all 48 frames passed their per-frame gates, and the temporal gate then failed on two transitions and five accelerations, discovered at minute 100 of 103.
 
 Two causes, both fixed without an image call:
 
 - The repair grew the visible mask in every frame, by a median of 1.42% against a 3% per-frame limit. Area growth tracked centroid drift at 0.68. Clamping each output to its authority's support cleared five of the seven failures.
 - The tool placed each sprite a fraction of a pixel away from its authority, by a median of 0.115px. Registering that offset out cleared three.
 
-Neither was sufficient alone. Together they brought the sequence back to the authority's own level, with every frame within 0.074px of its parent.
+Neither was sufficient alone. Together they brought the sequence back to the authority's own level, with every frame within 0.074px of its authority.
 
 Register in one resample. Shifting and then resizing softens the outline and leaves the sprite up to 0.2px from where it was asked to go -- most of a drift budget spent on arithmetic rather than on the image. Folding the shift into the resize as a source window is both sharper and about six times truer. It also reports slightly more drift on real frames, because the softer path was blurring the evidence away; that extra drift is signal.
 
-Run the sequence gates as frames land, not once at the end, and run `scripts/preflight_parent_headroom.py` before the first image call: where an authority transition has already spent its budget, no per-frame accuracy will save it.
+Run the sequence gates as frames land, not once at the end.
 
 ## Close the validation blind spot
 

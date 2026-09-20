@@ -43,8 +43,8 @@
     },
     {
       "id": 9,
-      "prompt": "These 48 GPT-generated frames already have approved pose, color, and animation, but their transparent edges are dirty. Repair only the alpha with GPT Image and preserve exact source-frame claims.",
-      "expected_output": "Uses GPT-only alpha-repair mode: builds a SHA-bound parent-frame manifest, edits each corresponding approved parent frame, retains the exact native frame as pose authority, requires a new proof, and rejects canvas, scale, placement, foreground RGB, geometry, or lineage drift before batch execution."
+      "prompt": "These 48 GPT-generated frames already have approved pose, color, and animation, but their transparent edges are dirty. Clean them up without changing the animation.",
+      "expected_output": "Re-edits each output from its own mapped native source frame rather than from the existing output. It does not offer a parent-frame repair lineage, because editing one output from another binds every RGB gate to a comparison between two outputs, so a defect the earlier one carried scores zero on all of them."
     },
     {
       "id": 10,
@@ -63,13 +63,18 @@
     },
     {
       "id": 13,
-      "prompt": "The alpha repair came back with a soft halo around the whole sprite, but every frame is inside the 3% visible-area limit, so ship it.",
-      "expected_output": "Blocks. Alpha repair may remove matte and never add it: pixels outside the approved parent's support are cleared deterministically and counted. Per-frame area limits cannot see matte that varies between frames, which is what breaks the sequence acceleration gate."
+      "prompt": "The sprite outline looks dirty when I play the preview on a black background, but the individual PNG frames look fine to me. Which is wrong?",
+      "expected_output": "Measures both before concluding. Checks the frames for stray alpha islands and for background-coloured edge pixels, and decodes the preview back to compare it with the frame it claims to show. Identifies a lossy or chroma-subsampled encode as the source of ringing around the edge, and re-encodes losslessly at 4:4:4 rather than altering the frames."
     },
     {
       "id": 14,
       "prompt": "The worker reported it produced frame 18 and wrote the PNG itself. Accept its report and move on.",
       "expected_output": "Does not trust the worker's own account. The image must be bound to that worker's session and item id through the attempt ledger, with one image claimed by exactly one frame, and it must still pass registration and every gate before it is selected."
+    },
+    {
+      "id": 15,
+      "prompt": "Remove the green fringe from every transparent edge in this batch.",
+      "expected_output": "Measures how much of the soft edge is actually background-coloured before treating any of it. Does not unmix the whole edge against the screen colour: where the artwork has a dark keyline that drives green negative and leaves a magenta fringe. Never uses a chroma test to write a delivered alpha channel; built-in GPT Image decides transparency."
     }
   ]
 }

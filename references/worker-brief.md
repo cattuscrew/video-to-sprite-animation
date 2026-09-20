@@ -6,8 +6,8 @@ Input images, already on disk at these absolute paths:
 
 {image_paths}
 
-Image 1 is the edit target. Image 2, if present, is a pose-verification
-reference only: do not regenerate from it, and do not copy its background.
+Image 1 is the edit target: this frame's own mapped native source frame. There
+is no second image, and no other frame is yours to open or look at.
 
 Call the built-in image tool once, passing all {image_count} path(s) as the
 referenced image paths, with this prompt:

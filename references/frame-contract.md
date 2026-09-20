@@ -6,7 +6,7 @@ The frame contract makes source-frame lineage, processing limits, and placement 
 
 - `frameConstruction`: normally `one-to-one-source`; `synthesized` only with explicit approval
 - `backgroundRemovalTool`: fixed to `GPT Image`
-- `processingMode`: `gpt-image-per-frame-edit`, `gpt-image-alpha-repair`, or approved `gpt-image-regeneration`
+- `processingMode`: `gpt-image-per-frame-edit`, or approved `gpt-image-regeneration`
 - `imageExecutionInterface`: fixed to `built-in-image-tool`; external APIs are forbidden
 - `credentialMode`: fixed to `none`; never request, discover, or configure an API key
 - `pixelAuthority` and `poseAuthority`
@@ -14,8 +14,6 @@ The frame contract makes source-frame lineage, processing limits, and placement 
 - `sourceFrameManifest`: mandatory for one-to-one processing with either tool
 - `sourceCorrespondenceRequired`: true for one-to-one processing
 - `perFrameAuthorityDirectory`: decoded selected native frames
-- `parentFrameManifest` and `parentFramesDirectory`: mandatory only for `gpt-image-alpha-repair`; each parent is SHA-bound to the same output/native-frame record
-- `parentCorrespondenceRequired`: true for `gpt-image-alpha-repair`
 
 Tolerances must cover the authority's own movement. An idle animation changes visible width by several percent as the arms swing and moves its contact point a pixel or two; a contract built on defaults tighter than that rejects the approved sequence rather than the work being validated. Measure the authority and pass `--scale-tolerance` and `--pivot-tolerance` accordingly.
 

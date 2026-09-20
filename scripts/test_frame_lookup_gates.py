@@ -16,8 +16,6 @@ from PIL import Image, ImageDraw
 
 CORRESPONDENCE = Path(__file__).with_name("validate_source_correspondence.py")
 TEMPORAL = Path(__file__).with_name("validate_temporal_sequence.py")
-LOCK = Path(__file__).with_name("lock_parent_foreground.py")
-ALPHA_REPAIR = Path(__file__).with_name("validate_alpha_repair.py")
 
 CANVAS = 64
 FRAME_COUNT = 4
@@ -68,38 +66,6 @@ def source_manifest(source_dir: Path) -> dict[str, object]:
         "outputFps": 24,
         "frameCount": FRAME_COUNT,
         "sharedTransform": {"scale": 1.0, "offset": [0, 0], "canvas": [CANVAS, CANVAS]},
-        "frameMapping": mapping,
-    }
-
-
-def parent_manifest(parent_dir: Path, source: dict[str, object]) -> dict[str, object]:
-    mapping = []
-    for record in source["frameMapping"]:
-        index = int(record["outputFrame"])
-        parent = parent_dir / f"frame-{index:03d}.png"
-        mapping.append(
-            {
-                "outputFrame": index,
-                "nativeFrame": record["nativeFrame"],
-                "sourceFile": record["sourceFile"],
-                "sourceSha256": record["sourceSha256"],
-                "parentFile": parent.name,
-                "parentSha256": sha256(parent),
-                "parentRole": "approved-foreground-edit-target",
-                "classification": "source-frame-gpt-alpha-repair",
-                "geometryChanged": False,
-            }
-        )
-    return {
-        "version": 1,
-        "frameConstruction": "one-to-one-source",
-        "processingMode": "gpt-image-alpha-repair",
-        "backgroundRemovalTool": "GPT Image",
-        "imageExecutionInterface": "built-in-image-tool",
-        "credentialMode": "none",
-        "sourceFrameManifest": "source-frame-manifest.json",
-        "parentFramesDirectory": str(parent_dir),
-        "frameCount": FRAME_COUNT,
         "frameMapping": mapping,
     }
 
@@ -188,101 +154,6 @@ class FrameLookupTests(unittest.TestCase):
         report = self.run_correspondence(drop=None)
         self.assertFalse(any("missing output frame" in e for e in report["errors"]))
         self.assertFalse(any("unmapped files" in e for e in report["errors"]))
-
-
-class LockStatusTests(unittest.TestCase):
-    """A blocked frame must not be reported as a complete lock."""
-
-    def run_lock(self, drop: int | None) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source_dir = root / "source"
-            parents = root / "parents"
-            gpt = root / "gpt"
-            for path in (source_dir, parents, gpt):
-                path.mkdir()
-            for index in range(1, FRAME_COUNT + 1):
-                write_sprite(source_dir / f"frame-{index:03d}.png", 10 + index, (0, 200, 0, 255))
-                write_sprite(parents / f"frame-{index:03d}.png", 10 + index, (80, 120, 160, 255))
-                if index != drop:
-                    write_sprite(gpt / f"frame-{index:03d}.png", 10 + index, (81, 121, 161, 255))
-            source = source_manifest(source_dir)
-            parent_path = root / "parent-frame-manifest.json"
-            parent_path.write_text(json.dumps(parent_manifest(parents, source)))
-            process = subprocess.run(
-                [
-                    sys.executable,
-                    str(LOCK),
-                    str(parent_path),
-                    str(gpt),
-                    str(root / "locked"),
-                    "--allow-missing",
-                ],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            report = json.loads((root / "parent-foreground-lock-report.json").read_text())
-            return process, report
-
-    def test_missing_gpt_frame_blocks_the_lock_report(self) -> None:
-        process, report = self.run_lock(drop=2)
-        self.assertEqual(process.returncode, 2, process.stdout + process.stderr)
-        self.assertEqual(report["status"], "user-visible-blocked")
-        self.assertEqual(report["blockedFrameCount"], 1)
-
-    def test_complete_batch_reports_complete(self) -> None:
-        process, report = self.run_lock(drop=None)
-        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-        self.assertEqual(report["status"], "complete")
-        self.assertEqual(report["blockedFrameCount"], 0)
-
-
-class InteriorRgbTests(unittest.TestCase):
-    """Interior RGB compared against locked frames measures the parent against itself."""
-
-    def run_repair_validation(self, pre_lock: bool) -> dict[str, object]:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source_dir = root / "source"
-            parents = root / "parents"
-            repaired = root / "repaired"
-            locked = root / "locked"
-            for path in (source_dir, parents, repaired, locked):
-                path.mkdir()
-            for index in range(1, FRAME_COUNT + 1):
-                write_sprite(source_dir / f"frame-{index:03d}.png", 10 + index, (0, 200, 0, 255))
-                write_sprite(parents / f"frame-{index:03d}.png", 10 + index, (80, 120, 160, 255))
-                # The repair shifted interior colour well past the 3.0 MAE limit.
-                write_sprite(repaired / f"frame-{index:03d}.png", 10 + index, (120, 160, 200, 255))
-                # The lock restored the parent's own pixels.
-                write_sprite(locked / f"frame-{index:03d}.png", 10 + index, (80, 120, 160, 255))
-            source = source_manifest(source_dir)
-            parent_path = root / "parent-frame-manifest.json"
-            parent_path.write_text(json.dumps(parent_manifest(parents, source)))
-            command = [
-                sys.executable,
-                str(ALPHA_REPAIR),
-                str(parent_path),
-                str(locked),
-                str(root / "qa" / "alpha-repair-validation.json"),
-            ]
-            if pre_lock:
-                command += ["--pre-lock-frames", str(repaired)]
-            subprocess.run(command, text=True, capture_output=True, check=False)
-            return json.loads((root / "qa" / "alpha-repair-validation.json").read_text())
-
-    def test_pre_lock_frames_expose_interior_colour_drift(self) -> None:
-        report = self.run_repair_validation(pre_lock=True)
-        self.assertEqual(report["interiorRgbMeasuredOn"], "pre-lock-repair")
-        self.assertEqual(report["status"], "repair-needed")
-        self.assertTrue(all(r["interiorRgbMeanAbsoluteError"] > 3.0 for r in report["frames"]))
-
-    def test_locked_frames_alone_cannot_establish_interior_fidelity(self) -> None:
-        report = self.run_repair_validation(pre_lock=False)
-        self.assertEqual(report["interiorRgbMeasuredOn"], "delivered-frames")
-        self.assertTrue(all(r["interiorRgbMeanAbsoluteError"] == 0.0 for r in report["frames"]))
-        self.assertTrue(any("measured on delivered frames" in e for e in report["errors"]))
 
 
 class TemporalHoleTests(unittest.TestCase):

@@ -33,7 +33,7 @@ except ImportError as error:  # pragma: no cover - dependency guidance
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     )
 
-from source_foreground import foreground_mask, parse_background, unmix
+from source_foreground import foreground_mask
 
 
 # Limits calibrated on the 48-frame run of 2026-09-20; see the reasoning in
@@ -202,7 +202,6 @@ def register(
     max_spread: float = MAX_QUADRANT_SPREAD,
     max_remaining: float = MAX_REMAINING_SHIFT,
     max_area_deviation: float = MAX_AREA_DEVIATION,
-    background: tuple[int, int, int] | None = None,
 ) -> tuple[np.ndarray | None, dict[str, object]]:
     """Register `edited` onto its native `authority` frame.
 
@@ -294,17 +293,6 @@ def register(
             f"outside {max_area_deviation:.0%}"
         )
 
-    if background is not None and not errors:
-        registered, moved = unmix(registered, background)
-        record.update(
-            {
-                "edgeDecontamination": "unmix-known-background",
-                "backgroundColor": list(background),
-                "edgePixelsRecoloured": moved,
-                "alphaChangedByDecontamination": False,
-            }
-        )
-
     record["errors"] = errors
     record["status"] = "accepted" if not errors else "repair-needed"
     return (registered if not errors else None), record
@@ -320,10 +308,6 @@ def main() -> int:
     parser.add_argument("--max-quadrant-spread", type=float, default=MAX_QUADRANT_SPREAD)
     parser.add_argument("--max-remaining-shift", type=float, default=MAX_REMAINING_SHIFT)
     parser.add_argument("--max-area-deviation", type=float, default=MAX_AREA_DEVIATION)
-    parser.add_argument(
-        "--background",
-        help="R,G,B of the source background; unmixes it out of the soft edge",
-    )
     args = parser.parse_args()
 
     edited = np.asarray(Image.open(args.edited).convert("RGBA"), dtype=np.uint8)
@@ -335,7 +319,6 @@ def main() -> int:
         max_spread=args.max_quadrant_spread,
         max_remaining=args.max_remaining_shift,
         max_area_deviation=args.max_area_deviation,
-        background=parse_background(args.background) if args.background else None,
     )
     record["edited"] = str(args.edited)
     record["authority"] = str(args.authority)

@@ -10,7 +10,6 @@ from delivery_policy import (
     delivery_mapping_errors,
     delivery_report_errors,
     mapping_manifest_errors,
-    parent_frame_manifest_errors,
     visual_qa_report_errors,
 )
 
@@ -87,41 +86,16 @@ def mapping(tool: str = "GPT Image") -> dict[str, object]:
     }
 
 
-def alpha_authority() -> dict[str, object]:
+def parent_lineage_authority() -> dict[str, object]:
+    """A manifest left over from when alpha repair was a mode."""
     value = authority()
     value.update(
         {
-            "processingMode": "gpt-image-alpha-repair",
-            "pixelAuthority": "approved-parent-frame-foreground",
             "parentFrameManifest": "/tmp/parent-frame-manifest.json",
             "parentFramesDirectory": "/tmp/parent-frames",
         }
     )
-    value["approvalScope"]["parentFrameRepairApproved"] = True
     return value
-
-
-def parent_mapping() -> dict[str, object]:
-    return {
-        "processingMode": "gpt-image-alpha-repair",
-        "backgroundRemovalTool": "GPT Image",
-        "imageExecutionInterface": "built-in-image-tool",
-        "credentialMode": "none",
-        "frameCount": 2,
-        "frameMapping": [
-            {
-                "outputFrame": index,
-                "nativeFrame": source["nativeFrame"],
-                "sourceSha256": source["sourceSha256"],
-                "parentFile": f"frame-{index:03d}.png",
-                "parentSha256": "b" * 64,
-                "parentRole": "approved-foreground-edit-target",
-                "classification": "source-frame-gpt-alpha-repair",
-                "geometryChanged": False,
-            }
-            for index, source in enumerate(mapping()["frameMapping"], start=1)
-        ],
-    }
 
 
 class DeliveryPolicyTests(unittest.TestCase):
@@ -133,21 +107,17 @@ class DeliveryPolicyTests(unittest.TestCase):
         self.assertEqual(authority_policy_errors(authority()), [])
         self.assertEqual(mapping_manifest_errors(mapping()), [])
 
-    def test_gpt_alpha_repair_requires_parent_lineage(self) -> None:
-        value = alpha_authority()
-        self.assertEqual(authority_policy_errors(value), [])
-        value.pop("parentFrameManifest")
-        self.assertTrue(
-            any("parentFrameManifest" in e for e in authority_policy_errors(value))
-        )
+    def test_parent_repair_lineage_is_rejected(self) -> None:
+        """Alpha repair is gone. An authority still claiming a parent frame is
+        editing something other than its own mapped native frame, so it fails
+        rather than quietly being accepted as one-to-one."""
+        errors = authority_policy_errors(parent_lineage_authority())
+        self.assertTrue(any("parent-frame repair lineage" in e for e in errors), errors)
 
-    def test_parent_manifest_binds_same_native_sources(self) -> None:
-        self.assertEqual(parent_frame_manifest_errors(parent_mapping(), mapping()), [])
-        value = parent_mapping()
-        value["frameMapping"][1]["nativeFrame"] = 999
-        self.assertTrue(
-            any("nativeFrame differs" in e for e in parent_frame_manifest_errors(value, mapping()))
-        )
+    def test_alpha_repair_processing_mode_is_no_longer_a_mode(self) -> None:
+        value = authority()
+        value["processingMode"] = "gpt-image-alpha-repair"
+        self.assertTrue(authority_policy_errors(value))
 
     def test_gpt_one_to_one_rejects_master_warp(self) -> None:
         value = authority()
@@ -212,10 +182,10 @@ class DeliveryPolicyTests(unittest.TestCase):
         report["selectedSourceFramesOneBased"] = [154, 156]
         self.assertTrue(delivery_mapping_errors(report, mapping()))
 
-    def test_alpha_repair_delivery_is_truthfully_classified(self) -> None:
+    def test_repair_classification_is_rejected(self) -> None:
         report = {
             "frameConstruction": "one-to-one-source",
-            "processingMode": "gpt-image-alpha-repair",
+            "processingMode": "gpt-image-per-frame-edit",
             "backgroundRemovalTool": "GPT Image",
             "imageExecutionInterface": "built-in-image-tool",
             "credentialMode": "none",
@@ -223,7 +193,9 @@ class DeliveryPolicyTests(unittest.TestCase):
             "selectedSourceFramesOneBased": [154, 155],
             "sourceCorrespondenceStatus": "accepted",
         }
-        self.assertEqual(delivery_report_errors(report, alpha_authority()), [])
+        self.assertTrue(
+            any("source-frame-gpt-edit" in e for e in delivery_report_errors(report, authority()))
+        )
 
     def test_delivery_requires_complete_visual_temporal_review(self) -> None:
         report = {
@@ -253,29 +225,29 @@ class RetryBudgetTests(unittest.TestCase):
     """Budgets are optional, but a stated one must be usable."""
 
     def test_absent_budgets_stay_valid(self) -> None:
-        self.assertEqual(authority_policy_errors(alpha_authority()), [])
+        self.assertEqual(authority_policy_errors(authority()), [])
 
     def test_both_kinds_are_accepted(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["approvalScope"]["retryBudgets"] = {"safetyBlock": 4, "quality": 2}
         self.assertEqual(authority_policy_errors(record), [])
 
     def test_a_single_shared_budget_is_rejected(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["approvalScope"]["retryBudgets"] = {"safetyBlock": 4}
         self.assertTrue(
             any("missing quality" in e for e in authority_policy_errors(record))
         )
 
     def test_a_negative_budget_is_rejected(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["approvalScope"]["retryBudgets"] = {"safetyBlock": -1, "quality": 2}
         self.assertTrue(
             any("non-negative" in e for e in authority_policy_errors(record))
         )
 
     def test_an_unknown_budget_kind_is_rejected(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["approvalScope"]["retryBudgets"] = {
             "safetyBlock": 4,
             "quality": 2,
@@ -286,31 +258,25 @@ class RetryBudgetTests(unittest.TestCase):
 
 class RegistrationPolicyTests(unittest.TestCase):
     def test_absent_policy_stays_valid(self) -> None:
-        self.assertEqual(authority_policy_errors(alpha_authority()), [])
+        self.assertEqual(authority_policy_errors(authority()), [])
 
     def test_translation_policy_needs_a_limit(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["registrationPolicy"] = {"type": "translation-only-to-authority"}
         self.assertTrue(any("maxPixels" in e for e in authority_policy_errors(record)))
 
     def test_declared_translation_policy_is_accepted(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["registrationPolicy"] = {
             "type": "translation-only-to-authority",
             "maxPixels": 2.0,
         }
-        record["mattePolicy"] = "never-exceeds-authority-support"
         self.assertEqual(authority_policy_errors(record), [])
 
     def test_an_invented_registration_type_is_rejected(self) -> None:
-        record = alpha_authority()
+        record = authority()
         record["registrationPolicy"] = {"type": "per-frame-recentering", "maxPixels": 2.0}
         self.assertTrue(any("registrationPolicy type" in e for e in authority_policy_errors(record)))
-
-    def test_an_invented_matte_policy_is_rejected(self) -> None:
-        record = alpha_authority()
-        record["mattePolicy"] = "whatever-the-tool-returns"
-        self.assertTrue(any("mattePolicy" in e for e in authority_policy_errors(record)))
 
 
 if __name__ == "__main__":

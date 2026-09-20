@@ -145,21 +145,22 @@ class ResetTimeTests(unittest.TestCase):
 class BriefTests(unittest.TestCase):
     TEMPLATE = Path(__file__).resolve().parent.parent / "references" / "worker-brief.md"
 
-    def test_alpha_repair_passes_parent_first_then_source(self) -> None:
+    def test_the_brief_sends_one_image_only(self) -> None:
+        """No second lineage means no second image, and no chance of sending
+        the wrong one as the edit target."""
         brief = build_brief(
             {
                 "outputFrame": 24,
                 "nativeFrame": 177,
-                "authority": "/run/parents/frame-024.png",
+                "authority": "/run/source/frame-024.png",
                 "sourceFile": "/run/source/frame-024.png",
-                "editTarget": "parent",
             },
-            "REPAIR PROMPT",
+            "EXTRACTION PROMPT",
             self.TEMPLATE.read_text(),
         )
-        self.assertIn("Image 1: /run/parents/frame-024.png", brief)
-        self.assertIn("Image 2: /run/source/frame-024.png", brief)
-        self.assertIn("REPAIR PROMPT", brief)
+        self.assertIn("Image 1: /run/source/frame-024.png", brief)
+        self.assertNotIn("Image 2:", brief)
+        self.assertIn("EXTRACTION PROMPT", brief)
         self.assertIn("output frame 24", brief)
 
     def test_standard_extraction_passes_only_the_source(self) -> None:
