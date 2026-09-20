@@ -17,6 +17,8 @@ The frame contract makes source-frame lineage, processing limits, and placement 
 - `parentFrameManifest` and `parentFramesDirectory`: mandatory only for `gpt-image-alpha-repair`; each parent is SHA-bound to the same output/native-frame record
 - `parentCorrespondenceRequired`: true for `gpt-image-alpha-repair`
 
+Tolerances must cover the authority's own movement. An idle animation changes visible width by several percent as the arms swing and moves its contact point a pixel or two; a contract built on defaults tighter than that rejects the approved sequence rather than the work being validated. Measure the authority and pass `--scale-tolerance` and `--pivot-tolerance` accordingly.
+
 The source manifest records output/native-frame order, timestamp, source filename, source SHA-256, classification, and whether RGB or geometry may change. One-to-one records require `sourceFrameRequired: true`, `geometryChanged: false`, and no holds or interpolation.
 
 Use `motionReferenceManifest` only for explicitly approved synthesized motion. It cannot satisfy source correspondence.
