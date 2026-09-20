@@ -43,6 +43,10 @@ GENERATED = CODEX_HOME / "generated_images"
 MODERATION_PATTERN = re.compile(r"moderation_blocked|safety system", re.I)
 USAGE_PATTERN = re.compile(r"usage limit|usage_limit_reached|rate.?limit", re.I)
 RESETS_PATTERN = re.compile(r"try again at ([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM)?)", re.I)
+# The 429 body carries the reset as an epoch: {"error":{...,"resets_at":1758...}}.
+# Without this the queue knows it is paused but not until when, and has to be
+# restarted by hand instead of waiting the right amount of time.
+RESETS_EPOCH_PATTERN = re.compile(r'"resets_at"\s*:\s*([0-9]{10,13})')
 IMAGE_ID_PATTERN = re.compile(r"(exec-[0-9a-f-]{36})")
 
 
@@ -116,7 +120,16 @@ def classify(found: dict, stdout: str, stderr: str) -> tuple[str, str]:
 
 
 def resets_at(text: str) -> float | None:
-    """Turn 'try again at 6:20 PM' into a timestamp, so the queue can wait."""
+    """When the limit lifts, so the queue can wait rather than be restarted.
+
+    Two forms, because the tool uses both: an epoch in the 429 body, and prose
+    in the message a worker relays.
+    """
+    epoch = RESETS_EPOCH_PATTERN.search(text or "")
+    if epoch:
+        value = int(epoch.group(1))
+        # Milliseconds if it is too large to be seconds.
+        return value / 1000.0 if value > 10_000_000_000 else float(value)
     match = RESETS_PATTERN.search(text or "")
     if not match:
         return None

@@ -138,6 +138,18 @@ class ResetTimeTests(unittest.TestCase):
         stamp = resets_at("try again at 00:01")
         self.assertGreater(stamp, time.time())
 
+    def test_an_epoch_in_the_429_body_is_understood(self) -> None:
+        """The real form. Prose parsing alone left 13 of 15 usage-limit records
+        with no reset time, so the queue knew it was paused but not until when."""
+        body = (
+            'image generation failed: http 429 Too Many Requests: '
+            '{"error":{"type":"usage_limit_reached","resets_at":1758410460}}'
+        )
+        self.assertEqual(resets_at(body), 1758410460.0)
+
+    def test_an_epoch_in_milliseconds_is_understood(self) -> None:
+        self.assertEqual(resets_at('"resets_at": 1758410460000'), 1758410460.0)
+
     def test_a_message_without_a_time_yields_nothing(self) -> None:
         self.assertIsNone(resets_at("You've hit your usage limit."))
 
