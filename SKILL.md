@@ -1,6 +1,6 @@
 ---
 name: video-to-sprite-animation
-description: Convert character-animation video into stable transparent sprite frames with exact selected-video-frame mapping, user-confirmed rembg or GPT Image background removal, per-frame source correspondence, topology and outline checks, fixed-root registration, visible repair diagnostics, and resumable packaging. Use for video-to-sprite, idle-loop extraction, transparent frame animation, FPS conversion, or AI-assisted frame cleanup.
+description: Convert character-animation video into stable transparent sprite frames with one-question-at-a-time approvals, exact selected-video-frame mapping, built-in GPT Image background removal, approved color authority, per-frame source correspondence, fixed-root registration, visible diagnostics, and resumable packaging. Use for video-to-sprite, idle-loop extraction, transparent frame animation, FPS conversion, or AI-assisted frame cleanup.
 ---
 
 # Video to Sprite Animation
@@ -11,31 +11,42 @@ Read [failure prevention](references/failure-prevention.md) for background-metho
 
 ## Defaults
 
-- Mode: `automatic` after the required source-preview and proof-frame approvals.
+- Mode: `automatic` only after the sequential decision gates, source-preview approval, transparency-proof approval, canonical color-reference approval for GPT Image, and final batch approval.
 - Frame construction: `one-to-one-source`. Every output must derive from its corresponding selected video frame.
-- Ask the user to confirm `rembg` or `GPT Image` before background removal. The tool choice is independent of frame mapping.
+- Background removal is fixed to `GPT Image` through the built-in image-generation/editing tool. Do not offer a background-removal method choice.
 - Canvas: 512 × 512 unless specified otherwise; playback: 12 FPS unless source timing or the user specifies otherwise.
 - Pivot: fixed anatomical bottom-center root; keep both boots on the shared ground line.
 - Produce separate transparent PNGs, an exact-FPS MP4, and a looping GIF.
-- There is no color-key, flood-fill, OpenCV keyer, custom mask, or silent fallback.
+- There is no rembg, color-key/chroma-key, flood-fill, OpenCV keyer, custom mask, external image API, or silent fallback.
+- Never request, discover, read, or configure an API key. If the built-in GPT Image tool is unavailable, stop and report that the required tool is unavailable.
+- Before any computer-use action that controls a browser or native app, ask for explicit approval for the specific proposed action and wait. Approval for image generation or batch execution does not approve computer use.
+
+## Sequential decision gate
+
+Before the first source-processing command, ask exactly one unresolved question with 2–3 concrete choices and wait for the answer. Continue one question per turn; never send a combined checklist, multi-question form, or treat one blanket “approve” as approval for several decisions. The only work allowed before the first answer is reading this skill and resolving the explicitly named input path.
+
+Confirm these decisions separately before execution reaches work that depends on them: frame construction, playback FPS, and canvas/pivot policy. Background removal is not a choice: use built-in GPT Image only. After source inspection, separately approve the selected loop preview. After the proof is rendered, separately approve transparency/outline quality. Separately select and approve a canonical color-reference frame and color-consistency strategy. Finally, ask one batch-execution question summarizing the already approved settings. Record each answer and its scope; do not re-ask a choice the user explicitly answered.
+
+Use a choice question even when recommending a default. Put the recommended option first and explain its consequence briefly. If a decision needs visual evidence, pause, create only that evidence, show it, then ask the single approval question.
 
 ## Workflow
 
-1. **Inspect the source.** Record native FPS, duration, resolution, and source usability. Render a representative contact sheet. Read [motion planning](references/motion-planning.md).
-2. **Confirm selection settings.** Confirm the source range, native frame numbers, playback FPS, loop construction, canvas, and pivot. Do not infer a final range from a broad search range.
-3. **Find the loop.** Extract and score candidates at native FPS with `scripts/find_loop_candidates.py`.
-4. **Approve the source preview.** Show the proposed loop before background processing and stop until approved.
-5. **Freeze the selected-frame map.** Decode the approved frames at native resolution. Run `scripts/build_source_frame_manifest.py` with the chosen background tool before processing. The manifest must list every output frame, native frame, timestamp, source filename, and source SHA-256.
-6. **Confirm the background tool.** Ask the user to choose `rembg` or `GPT Image`. A generic “approve” is not tool approval. Record the choice and scoped proof approval in `authority-manifest.json`.
-7. **Process one proof frame.** Show the full-resolution transparent proof on checkerboard, white, and black, plus 100%/4× fragile-region crops. Compare it with that exact mapped source frame. Stop until approved.
-8. **Build the contract.** Run `scripts/build_frame_contract.py`. Read [frame contract](references/frame-contract.md).
-9. **Process every mapped frame one-to-one.**
-   - For rembg, read [rembg extraction](references/rembg-extraction.md). Apply the approved alpha to untouched source RGB.
-   - For GPT Image, use each mapped native frame itself as that output’s edit input. Read [GPT per-frame editing](references/gpt-per-frame-editing.md) and [prompt templates](references/prompt-templates.md). Do not use one canonical master as the timeline source.
-10. **Validate every output against its mapped source.** Run `scripts/validate_and_diagnose.py`, `scripts/validate_temporal_sequence.py`, and `scripts/validate_source_correspondence.py`. For rembg also run `scripts/validate_protected_frames.py`. For GPT Image, supply a complete pose-correspondence report comparing each output with its exact source frame.
-11. **Normalize safely.** Use one shared scale and integer translation with `scripts/normalize_validate.py`. Per-frame recentering is off by default; never independently crop, enlarge, or recenter frames.
-12. **Run visual QA.** Read [quality gates](references/quality-gates.md). Inspect source/output pairs, previous/current/next triplets, normal and slow playback, full-batch topology, checkerboard, white, and black views.
-13. **Validate and package.** Create `delivery-report.json` with `selectedSourceFramesOneBased` exactly matching the source manifest. Run `scripts/validate_delivery_package.py`; package only when it returns accepted.
+1. **Run sequential preflight.** Ask one choice at a time and wait after each answer. Confirm frame construction, FPS, and canvas/pivot policy before source processing. State that background removal uses built-in GPT Image; do not ask the user to choose a method. A generic “approve” cannot approve multiple decisions.
+2. **Inspect the source.** Record native FPS, duration, resolution, and source usability. Render a representative contact sheet. Read [motion planning](references/motion-planning.md).
+3. **Confirm selection settings sequentially.** Ask only the next unresolved choice. Confirm the source range/native frames and loop construction separately from any other setting. Do not infer a final range from a broad search range.
+4. **Find the loop.** Extract and score candidates at native FPS with `scripts/find_loop_candidates.py`.
+5. **Approve the source preview.** Show the proposed loop, ask only whether to approve that loop or inspect another candidate, and stop until answered.
+6. **Freeze the selected-frame map.** Decode the approved frames at native resolution. Run `scripts/build_source_frame_manifest.py`; it records the fixed built-in GPT Image policy. The manifest must list every output frame, native frame, timestamp, source filename, and source SHA-256.
+7. **Process one transparency proof.** Show the full-resolution transparent proof on checkerboard, white, and black, plus 100%/4× fragile-region crops. Compare it with that exact mapped source frame. Ask one transparency/outline approval question and stop until answered.
+8. **Approve color authority.** Show 2–3 color-reference choices when available: the approved proof/source frame, another selected native frame, or user-supplied clean artwork. Ask the user to select one, then show the chosen reference full-resolution and ask a separate approval question. Record its path, SHA-256, `role: appearance-only`, and approval in `authority-manifest.json`. Ask a separate question to choose `reference-guided-gpt` or `reference-guided-gpt-with-deterministic-palette-normalization`. A transparency approval is not color approval.
+9. **Approve batch execution.** Summarize the already approved mapping, FPS, canvas/pivot, fixed built-in GPT Image policy, transparency proof, canonical color reference, and color strategy. Ask one question: execute the mapped batch or revise one setting. Do not begin batch generation before approval.
+10. **Build the contract.** Run `scripts/build_frame_contract.py`. Read [frame contract](references/frame-contract.md).
+11. **Process every mapped frame one-to-one with built-in GPT Image.** Use each mapped native frame itself as that output’s edit input. Read [GPT per-frame editing](references/gpt-per-frame-editing.md) and [prompt templates](references/prompt-templates.md). Do not use one canonical master as the timeline source. Do not request an API key or switch to an external API.
+12. **Normalize color deterministically when approved.** If the selected GPT strategy includes palette normalization, apply it after per-frame editing and before validation. Lock alpha, pose, geometry, placement, and outlines; use the approved color reference only for foreground RGB. Never silently introduce recoloring when the user selected reference guidance only.
+13. **Validate every output against its mapped source and color authority.** Run `scripts/validate_and_diagnose.py`, `scripts/validate_temporal_sequence.py`, and `scripts/validate_source_correspondence.py`. Supply a complete pose-correspondence report comparing each output with its exact source frame; each record must accept silhouette, topology, equipment geometry, eye state, and negative spaces and link its source/output comparison artifact. Inspect per-material color stability against the approved canonical reference.
+14. **Normalize geometry safely.** Use one shared scale and integer translation with `scripts/normalize_validate.py`. Per-frame recentering is off by default; never independently crop, enlarge, or recenter frames.
+15. **Run visual QA.** Read [quality gates](references/quality-gates.md). Inspect source/output pairs, previous/current/next triplets, normal and slow playback, the generated alpha-onion sheet, full-batch topology and landmark continuity, checkerboard, white, black, and color-reference comparison views. Write `visual-qa-report.json` using the required schema; a prose claim is insufficient.
+16. **Validate and package.** Create `delivery-report.json` with `selectedSourceFramesOneBased` exactly matching the source manifest. Pass `visual-qa-report.json` to `scripts/validate_delivery_package.py`; package only when it returns accepted.
 
 ## Synthesized motion exception
 
@@ -45,11 +56,15 @@ Warping a master, transferring centroid/landmark/flow motion, generating new pos
 
 - The approved source-frame list is immutable. At native FPS, use every selected frame exactly once and in order.
 - For a selected range such as 154–201, output 1 derives from 154, output 2 from 155, through output 48 from 201.
-- Background removal method and frame provenance are independent: both rembg and GPT Image may process one-to-one source frames.
+- Background removal uses built-in GPT Image only; rembg and chroma-key extraction are not permitted workflow branches.
 - GPT Image one-to-one mode edits every selected source frame individually. It may change pixels, but it may not substitute pose, silhouette, timing, equipment angle, or another frame.
+- GPT Image batch processing requires a separately user-approved canonical color reference with `role: appearance-only`. It guides palette and rendering only and never replaces the mapped native frame as pose authority.
+- Transparency-proof approval and canonical color-reference approval are separate. Neither implies the other, and neither authorizes batch execution.
 - No one-master warping, centroid transfer, motion reconstruction, interpolation, holding, skipping, duplication, or reordering is allowed unless the user explicitly approves synthesized motion.
-- `source-frame-manifest.json` is mandatory for one-to-one processing regardless of background tool. Each record includes `sourceFrameRequired: true` and the source SHA-256.
+- `source-frame-manifest.json` is mandatory for one-to-one processing. Each record includes `sourceFrameRequired: true` and the source SHA-256.
 - Validation must compare every output to the exact mapped source. Smoothness, pivot, palette, bounds, or master consistency cannot prove source correspondence.
+- Temporal acceptance must include local alpha-silhouette, visible-area, bounding-box-size, and centroid step/acceleration gates. A global motion average cannot waive a local redraw pop.
+- Final delivery requires a machine-readable accepted visual-QA report covering normal speed, slow speed, triplets, onion skin, exact-source motion comparison, source/output pairs, topology, and named landmark continuity.
 - Changing FPS invalidates the timeline. Rebuild the mapping directly from native frames rather than reusing a prior lower-FPS output.
 - Canvas, camera, shared scale, ground line, and numerical pivot remain fixed. Preserve the complete character and all equipment.
 - Enclosed gaps under the chin, arms, hair, equipment, and other negative spaces stay transparent and cannot inherit neighboring colors.

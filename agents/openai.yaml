@@ -1,4 +1,4 @@
 interface:
   display_name: "Video to Sprite Animation"
   short_description: "Convert videos into stable sprite animations"
-  default_prompt: "Use $video-to-sprite-animation to find and preview a stable loop, freeze the exact selected-video-frame mapping, confirm rembg or GPT Image independently, process every mapped frame one-to-one, and pass source-correspondence and delivery validation."
+  default_prompt: "Use $video-to-sprite-animation to find and preview a stable loop, freeze the exact selected-video-frame mapping, use built-in GPT Image for every mapped frame one-to-one without requesting API credentials, and pass source-correspondence and delivery validation. Ask before any computer-use action."

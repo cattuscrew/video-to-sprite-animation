@@ -16,12 +16,8 @@ def main() -> None:
     parser.add_argument("--first-native-frame", type=int, required=True)
     parser.add_argument("--source-fps", type=float, required=True)
     parser.add_argument("--output-fps", type=float, required=True)
-    parser.add_argument(
-        "--background-removal-tool", choices=("rembg", "GPT Image"), required=True
-    )
     parser.add_argument("--canvas", default="720,720")
     parser.add_argument("--offset", default="0,0")
-    parser.add_argument("--expected-alpha-dir", type=Path)
     args = parser.parse_args()
 
     if args.source_fps != args.output_fps:
@@ -38,11 +34,7 @@ def main() -> None:
         raise SystemExit("--canvas and --offset require x,y pairs")
 
     mapping = []
-    classification = (
-        "exact-source-extraction"
-        if args.background_removal_tool == "rembg"
-        else "source-frame-gpt-edit"
-    )
+    classification = "source-frame-gpt-edit"
     for index, path in enumerate(files, start=1):
         native_frame = args.first_native_frame + index - 1
         mapping.append(
@@ -55,11 +47,11 @@ def main() -> None:
                 "classification": classification,
                 "sourceFrameRequired": True,
                 "sourceSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "rgbChanged": args.background_removal_tool == "GPT Image",
+                "rgbChanged": True,
                 "geometryChanged": False,
                 "held": False,
                 "interpolated": False,
-                "generated": args.background_removal_tool == "GPT Image",
+                "generated": True,
             }
         )
 
@@ -68,11 +60,10 @@ def main() -> None:
         "frameConstruction": "one-to-one-source",
         "mappingRole": "selected-source-frame-authority",
         "processingType": "one-to-one-source-processing",
-        "backgroundRemovalTool": args.background_removal_tool,
+        "backgroundRemovalTool": "GPT Image",
+        "imageExecutionInterface": "built-in-image-tool",
+        "credentialMode": "none",
         "sourceFramesDirectory": str(args.source_frames.resolve()),
-        "expectedAlphaDirectory": (
-            str(args.expected_alpha_dir.resolve()) if args.expected_alpha_dir else None
-        ),
         "sourceFps": args.source_fps,
         "outputFps": args.output_fps,
         "frameCount": len(mapping),

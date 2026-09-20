@@ -17,12 +17,6 @@ NON_SOURCE_CLASSIFICATIONS = {
 
 def expected_tool_fields(construction: str, tool: str) -> dict[str, str] | None:
     policies = {
-        (ONE_TO_ONE, "rembg"): {
-            "processingMode": "rembg-extraction",
-            "pixelAuthority": "native-source-rgb",
-            "poseAuthority": "selected-native-source-frame",
-            "mappingRole": SOURCE_MAPPING_ROLE,
-        },
         (ONE_TO_ONE, "GPT Image"): {
             "processingMode": "gpt-image-per-frame-edit",
             "pixelAuthority": "gpt-edited-selected-source-frame",
@@ -45,8 +39,12 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
     tool = authority.get("backgroundRemovalTool")
     if construction not in {ONE_TO_ONE, SYNTHESIZED}:
         return ["authority frameConstruction must be one-to-one-source or synthesized"]
-    if tool not in {"rembg", "GPT Image"}:
-        return ["authority backgroundRemovalTool must be rembg or GPT Image"]
+    if tool != "GPT Image":
+        return ["authority backgroundRemovalTool must be GPT Image"]
+    if authority.get("imageExecutionInterface") != "built-in-image-tool":
+        errors.append("authority imageExecutionInterface must be built-in-image-tool")
+    if authority.get("credentialMode") != "none":
+        errors.append("authority credentialMode must be none; API credentials are forbidden")
     expected = expected_tool_fields(str(construction), str(tool))
     if expected is None:
         errors.append(
@@ -61,8 +59,6 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
                     f"frameConstruction={construction!r} and tool={tool!r}; "
                     f"expected {value!r}"
                 )
-    if authority.get("backgroundRemovalToolApproved") is not True:
-        errors.append("background-removal tool is not user-approved")
     if authority.get("userApproved") is not True:
         errors.append("authority/proof frame is not user-approved")
     if authority.get("derivedFromRejectedOutput") is not False:
@@ -81,13 +77,34 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
             errors.append("one-to-one processing forbids master warping")
         if approval.get("geometryPreserved") is not True:
             errors.append("one-to-one authority lacks geometryPreserved approval")
-        if tool == "rembg" and approval.get("foregroundRgbPreserved") is not True:
-            errors.append("rembg authority lacks foregroundRgbPreserved approval")
         if tool == "GPT Image":
             if approval.get("perFrameGptEditApproved") is not True:
                 errors.append("per-frame GPT Image editing is not explicitly approved")
             if approval.get("sourcePixelChangesAccepted") is not True:
                 errors.append("GPT Image source-pixel changes are not explicitly accepted")
+            color_reference = authority.get("canonicalColorReference")
+            if not isinstance(color_reference, dict):
+                errors.append("GPT Image authority lacks canonicalColorReference")
+            else:
+                if color_reference.get("role") != "appearance-only":
+                    errors.append("canonical color reference role must be appearance-only")
+                digest = color_reference.get("sha256")
+                if not isinstance(digest, str) or len(digest) != 64:
+                    errors.append("canonical color reference lacks SHA-256")
+                if not color_reference.get("path"):
+                    errors.append("canonical color reference lacks path")
+            if approval.get("canonicalColorReferenceApproved") is not True:
+                errors.append("canonical color reference is not explicitly approved")
+            strategy = authority.get("colorConsistencyStrategy")
+            if strategy not in {
+                "reference-guided-gpt",
+                "reference-guided-gpt-with-deterministic-palette-normalization",
+            }:
+                errors.append("GPT Image authority lacks an approved color-consistency strategy")
+            if approval.get("colorConsistencyStrategyApproved") is not True:
+                errors.append("color-consistency strategy is not explicitly approved")
+            if approval.get("batchExecutionApproved") is not True:
+                errors.append("GPT Image batch execution is not explicitly approved")
     else:
         if not authority.get("canonicalMaster"):
             errors.append("synthesized authority is missing canonicalMaster")
@@ -142,11 +159,13 @@ def mapping_manifest_errors(
             errors.append("one-to-one mappingRole must be selected-source-frame-authority")
         if manifest.get("processingType") != "one-to-one-source-processing":
             errors.append("one-to-one processingType is invalid")
-        expected_class = (
-            "exact-source-extraction" if tool == "rembg" else "source-frame-gpt-edit"
-        )
-        if tool not in {"rembg", "GPT Image"}:
-            errors.append("one-to-one mapping tool must be rembg or GPT Image")
+        expected_class = "source-frame-gpt-edit"
+        if tool != "GPT Image":
+            errors.append("one-to-one mapping tool must be GPT Image")
+        if manifest.get("imageExecutionInterface") != "built-in-image-tool":
+            errors.append("one-to-one mapping must use built-in-image-tool")
+        if manifest.get("credentialMode") != "none":
+            errors.append("one-to-one mapping credentialMode must be none")
         for index, record in enumerate(mapping, start=1):
             if record.get("outputFile") != f"frame-{index:03d}.png":
                 errors.append(f"mapping frame {index} outputFile is incorrect")
@@ -183,6 +202,7 @@ def contract_policy_errors(contract: dict[str, Any]) -> list[str]:
     errors = authority_policy_errors(authority)
     for field in (
         "frameConstruction", "processingMode", "backgroundRemovalTool",
+        "imageExecutionInterface", "credentialMode",
         "pixelAuthority", "poseAuthority", "mappingRole",
     ):
         if contract.get(field) != authority.get(field):
@@ -209,14 +229,17 @@ def contract_policy_errors(contract: dict[str, Any]) -> list[str]:
 
 def delivery_report_errors(report: dict[str, Any], authority: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    for field in ("frameConstruction", "processingMode", "backgroundRemovalTool"):
+    for field in (
+        "frameConstruction", "processingMode", "backgroundRemovalTool",
+        "imageExecutionInterface", "credentialMode",
+    ):
         if report.get(field) != authority.get(field):
             errors.append(f"delivery report {field} does not match authority")
     construction = authority.get("frameConstruction")
     tool = authority.get("backgroundRemovalTool")
     classification = report.get("processingClassification")
     if construction == ONE_TO_ONE:
-        expected = "exact-source-extraction" if tool == "rembg" else "source-frame-gpt-edit"
+        expected = "source-frame-gpt-edit"
         if classification != expected:
             errors.append(f"one-to-one delivery classification must be {expected}")
         if not report.get("selectedSourceFramesOneBased"):
@@ -257,3 +280,39 @@ def delivery_mapping_errors(
     if report.get(key) != expected:
         return [f"delivery report {key} does not exactly match mapping manifest"]
     return []
+
+
+def visual_qa_report_errors(report: dict[str, Any]) -> list[str]:
+    """Require evidence that subtle temporal redraw drift was actually reviewed."""
+    errors: list[str] = []
+    if report.get("status") != "accepted":
+        errors.append("visual QA report status is not accepted")
+    required_checks = (
+        "normalSpeedReviewed",
+        "slowSpeedReviewed",
+        "tripletsReviewed",
+        "onionSkinReviewed",
+        "sourceOutputPairsReviewed",
+        "sourceMotionCompared",
+        "topologyAndLandmarksReviewed",
+    )
+    for field in required_checks:
+        if report.get(field) is not True:
+            errors.append(f"visual QA report lacks {field}")
+    artifacts = report.get("artifacts")
+    if not isinstance(artifacts, dict):
+        errors.append("visual QA report lacks artifact paths")
+    else:
+        for field in (
+            "exactFpsPreview",
+            "slowPreview",
+            "triplets",
+            "onionSkin",
+            "sourceMotionComparison",
+        ):
+            if not artifacts.get(field):
+                errors.append(f"visual QA report lacks {field} artifact")
+    reviewer = report.get("reviewer")
+    if reviewer not in {"agent", "user", "agent-and-user"}:
+        errors.append("visual QA report has invalid reviewer")
+    return errors

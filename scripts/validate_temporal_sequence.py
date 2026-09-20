@@ -61,6 +61,80 @@ def motion_energy(a: np.ndarray, b: np.ndarray, ignored: list[list[int]]) -> flo
     return float(np.mean(np.abs(a.astype(np.float32)[mask] - b.astype(np.float32)[mask])) / 255.0)
 
 
+def silhouette_metrics(image: np.ndarray) -> dict[str, object]:
+    mask = image[:, :, 3] > 18
+    ys, xs = np.nonzero(mask)
+    if not len(xs):
+        return {"mask": mask, "area": 0, "bbox": [0, 0, 0, 0], "size": [0, 0], "centroid": [0.0, 0.0]}
+    left, right = int(xs.min()), int(xs.max()) + 1
+    top, bottom = int(ys.min()), int(ys.max()) + 1
+    return {
+        "mask": mask,
+        "area": int(mask.sum()),
+        "bbox": [left, top, right, bottom],
+        "size": [right - left, bottom - top],
+        "centroid": [float(xs.mean()), float(ys.mean())],
+    }
+
+
+def alpha_onion(first: np.ndarray, second: np.ndarray) -> Image.Image:
+    a = first[:, :, 3] > 18
+    b = second[:, :, 3] > 18
+    rgb = np.zeros((*a.shape, 3), dtype=np.uint8)
+    rgb[:, :, 0] = a.astype(np.uint8) * 255
+    rgb[:, :, 1] = b.astype(np.uint8) * 255
+    rgb[:, :, 2] = b.astype(np.uint8) * 255
+    return Image.fromarray(rgb, "RGB")
+
+
+def thumbnail(image: Image.Image, size: tuple[int, int] = (240, 240)) -> Image.Image:
+    copy = image.copy()
+    copy.thumbnail(size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", size, (32, 32, 32, 255))
+    canvas.alpha_composite(copy, ((size[0] - copy.width) // 2, (size[1] - copy.height) // 2))
+    return canvas
+
+
+def write_temporal_diagnostics(
+    output: Path,
+    images: list[np.ndarray],
+    flagged_frames: set[int],
+) -> dict[str, object]:
+    diagnostic_dir = output / "temporal-triplets"
+    diagnostic_dir.mkdir(parents=True, exist_ok=True)
+    for frame_number in sorted(flagged_frames):
+        index = frame_number - 1
+        panels = []
+        for item in (max(0, index - 1), index, min(len(images) - 1, index + 1)):
+            panels.append(thumbnail(Image.fromarray(images[item], "RGBA")))
+        sheet = Image.new("RGBA", (720, 270), (255, 255, 255, 255))
+        draw = ImageDraw.Draw(sheet)
+        for panel_index, panel in enumerate(panels):
+            sheet.alpha_composite(panel, (panel_index * 240, 30))
+        draw.text((8, 8), f"previous / frame {frame_number:03d} / next", fill="black")
+        sheet.convert("RGB").save(diagnostic_dir / f"frame-{frame_number:03d}-triplet.png")
+
+    onions = [alpha_onion(images[index], images[index + 1]) for index in range(len(images) - 1)]
+    tile = 120
+    columns = min(8, max(1, len(onions)))
+    rows = (len(onions) + columns - 1) // columns
+    onion_sheet = Image.new("RGB", (columns * tile, rows * (tile + 18)), "white")
+    draw = ImageDraw.Draw(onion_sheet)
+    for index, item in enumerate(onions):
+        item.thumbnail((tile, tile), Image.Resampling.NEAREST)
+        x = (index % columns) * tile
+        y = (index // columns) * (tile + 18)
+        onion_sheet.paste(item, (x, y))
+        draw.text((x + 2, y + tile + 2), f"{index + 1}->{index + 2}", fill="black")
+    onion_path = output / "temporal-alpha-onion-sheet.png"
+    onion_sheet.save(onion_path)
+    return {
+        "flaggedTripletDirectory": str(diagnostic_dir.resolve()),
+        "flaggedTripletCount": len(flagged_frames),
+        "alphaOnionSheet": str(onion_path.resolve()),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("contract", type=Path)
@@ -70,6 +144,12 @@ def main() -> int:
     parser.add_argument("--max-duplicate-ratio", type=float)
     parser.add_argument("--max-consecutive-holds", type=int)
     parser.add_argument("--max-motion-spike-ratio", type=float)
+    parser.add_argument("--max-silhouette-spike-ratio", type=float)
+    parser.add_argument("--max-visible-area-step-ratio", type=float)
+    parser.add_argument("--max-bbox-size-step-pixels", type=float)
+    parser.add_argument("--max-bbox-size-acceleration-pixels", type=float)
+    parser.add_argument("--max-centroid-step-pixels", type=float)
+    parser.add_argument("--max-centroid-acceleration-pixels", type=float)
     parser.add_argument("--max-seam-ratio", type=float)
     args = parser.parse_args()
 
@@ -77,7 +157,13 @@ def main() -> int:
     temporal = contract.get("temporalLimits", {})
     max_duplicate_ratio = args.max_duplicate_ratio if args.max_duplicate_ratio is not None else float(temporal.get("maximumDuplicateRatio", 0.10))
     max_consecutive_holds = args.max_consecutive_holds if args.max_consecutive_holds is not None else int(temporal.get("maximumConsecutiveHolds", 1))
-    max_motion_spike_ratio = args.max_motion_spike_ratio if args.max_motion_spike_ratio is not None else float(temporal.get("maximumMotionSpikeRatio", 3.0))
+    max_motion_spike_ratio = args.max_motion_spike_ratio if args.max_motion_spike_ratio is not None else float(temporal.get("maximumMotionSpikeRatio", 2.0))
+    max_silhouette_spike_ratio = args.max_silhouette_spike_ratio if args.max_silhouette_spike_ratio is not None else float(temporal.get("maximumSilhouetteSpikeRatio", 1.8))
+    max_area_step = args.max_visible_area_step_ratio if args.max_visible_area_step_ratio is not None else float(temporal.get("maximumVisibleAreaStepRatio", 0.03))
+    max_bbox_step = args.max_bbox_size_step_pixels if args.max_bbox_size_step_pixels is not None else float(temporal.get("maximumBoundingBoxSizeStepPixels", 12.0))
+    max_bbox_accel = args.max_bbox_size_acceleration_pixels if args.max_bbox_size_acceleration_pixels is not None else float(temporal.get("maximumBoundingBoxSizeAccelerationPixels", 16.0))
+    max_centroid_step = args.max_centroid_step_pixels if args.max_centroid_step_pixels is not None else float(temporal.get("maximumCentroidStepPixels", 2.0))
+    max_centroid_accel = args.max_centroid_acceleration_pixels if args.max_centroid_acceleration_pixels is not None else float(temporal.get("maximumCentroidAccelerationPixels", 1.5))
     max_seam_ratio = args.max_seam_ratio if args.max_seam_ratio is not None else float(temporal.get("maximumLoopSeamRatio", 3.0))
     paths = sorted(args.frames.glob("frame-*.png"))
     if len(paths) < 2:
@@ -121,6 +207,73 @@ def main() -> int:
             transition = f"{index + 1}->{index + 2}"
             if value > median_motion * max_motion_spike_ratio and transition not in approved:
                 spikes.append({"transition": transition, "energy": value})
+
+    silhouettes = [silhouette_metrics(image) for image in images]
+    silhouette_deltas = []
+    area_steps = []
+    bbox_steps = []
+    centroid_steps = []
+    for index in range(len(images) - 1):
+        first, second = silhouettes[index], silhouettes[index + 1]
+        union = np.logical_or(first["mask"], second["mask"])
+        changed = np.logical_xor(first["mask"], second["mask"])
+        silhouette_deltas.append(float(changed.sum() / max(1, union.sum())))
+        area_steps.append(abs(int(second["area"]) - int(first["area"])) / max(1, int(first["area"])))
+        bbox_steps.append([
+            abs(int(second["size"][0]) - int(first["size"][0])),
+            abs(int(second["size"][1]) - int(first["size"][1])),
+        ])
+        centroid_steps.append(float(np.linalg.norm(np.asarray(second["centroid"]) - np.asarray(first["centroid"]))))
+    nonzero_silhouette = [value for value in silhouette_deltas if value > 1e-8]
+    median_silhouette = float(np.median(nonzero_silhouette)) if nonzero_silhouette else 0.0
+    geometry_failures = []
+    flagged_frames: set[int] = set()
+    for index in range(len(images) - 1):
+        transition = f"{index + 1}->{index + 2}"
+        if transition in approved:
+            continue
+        reasons = []
+        if median_silhouette and silhouette_deltas[index] > median_silhouette * max_silhouette_spike_ratio:
+            reasons.append("silhouette-change spike")
+        if area_steps[index] > max_area_step:
+            reasons.append("visible-area step")
+        if max(bbox_steps[index]) > max_bbox_step:
+            reasons.append("bounding-box size step")
+        if centroid_steps[index] > max_centroid_step:
+            reasons.append("centroid step")
+        if reasons:
+            geometry_failures.append({
+                "transition": transition,
+                "reasons": reasons,
+                "silhouetteChange": silhouette_deltas[index],
+                "visibleAreaStepRatio": area_steps[index],
+                "boundingBoxSizeStepPixels": bbox_steps[index],
+                "centroidStepPixels": centroid_steps[index],
+            })
+            flagged_frames.update((index + 1, index + 2))
+
+    acceleration_failures = []
+    for index in range(1, len(images) - 1):
+        surrounding = {f"{index}->{index + 1}", f"{index + 1}->{index + 2}"}
+        if surrounding & approved:
+            continue
+        sizes = [silhouettes[item]["size"] for item in (index - 1, index, index + 1)]
+        bbox_acceleration = [abs(int(sizes[2][axis]) - 2 * int(sizes[1][axis]) + int(sizes[0][axis])) for axis in (0, 1)]
+        centroids = [np.asarray(silhouettes[item]["centroid"], dtype=np.float32) for item in (index - 1, index, index + 1)]
+        centroid_acceleration = float(np.linalg.norm(centroids[2] - 2 * centroids[1] + centroids[0]))
+        reasons = []
+        if max(bbox_acceleration) > max_bbox_accel:
+            reasons.append("bounding-box size acceleration")
+        if centroid_acceleration > max_centroid_accel:
+            reasons.append("centroid acceleration")
+        if reasons:
+            acceleration_failures.append({
+                "frame": index + 1,
+                "reasons": reasons,
+                "boundingBoxSizeAccelerationPixels": bbox_acceleration,
+                "centroidAccelerationPixels": centroid_acceleration,
+            })
+            flagged_frames.add(index + 1)
     seam_ratio = energies[-1] / median_motion if median_motion else (0.0 if energies[-1] == 0 else float("inf"))
 
     locked_failures = []
@@ -167,6 +320,10 @@ def main() -> int:
         errors.append(f"consecutive hold run {longest_hold_run} exceeds {max_consecutive_holds}")
     if spikes:
         errors.append(f"unapproved motion spikes: {len(spikes)}")
+    if geometry_failures:
+        errors.append(f"local silhouette/geometry transitions failed: {len(geometry_failures)}")
+    if acceleration_failures:
+        errors.append(f"local silhouette/geometry accelerations failed: {len(acceleration_failures)}")
     if seam_ratio > max_seam_ratio:
         errors.append(f"loop seam ratio {seam_ratio:.3f} exceeds {max_seam_ratio:.3f}")
     if locked_failures:
@@ -176,6 +333,8 @@ def main() -> int:
     if state_failures:
         errors.append(f"semantic-state matches failed: {len(state_failures)}")
 
+    args.output.mkdir(parents=True, exist_ok=True)
+    diagnostics = write_temporal_diagnostics(args.output, images, flagged_frames)
     result = {
         "status": "accepted" if not errors else "repair-needed",
         "frameCount": len(images),
@@ -189,6 +348,14 @@ def main() -> int:
         "motionEnergy": energies,
         "medianNonzeroMotion": median_motion,
         "motionSpikes": spikes,
+        "silhouetteChange": silhouette_deltas,
+        "medianNonzeroSilhouetteChange": median_silhouette,
+        "visibleAreaStepRatio": area_steps,
+        "boundingBoxSizeStepPixels": bbox_steps,
+        "centroidStepPixels": centroid_steps,
+        "geometryTransitionFailures": geometry_failures,
+        "geometryAccelerationFailures": acceleration_failures,
+        "diagnostics": diagnostics,
         "loopSeamEnergy": energies[-1],
         "loopSeamRatio": seam_ratio,
         "lockedRegionFailures": locked_failures,
@@ -196,7 +363,6 @@ def main() -> int:
         "stateFailures": state_failures,
         "errors": errors,
     }
-    args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "temporal-validation-report.json").write_text(json.dumps(result, indent=2) + "\n")
 
     width, height = 900, 300

@@ -11,10 +11,12 @@ This image is the mandatory pose authority for output frame {output_frame}, mapp
 
 Keep the entire character and both boots. Preserve the approved canvas, shared scale, bottom-center anatomical pivot, and ground line. Keep gaps under the chin, arms, hair, weapons, and equipment transparent.
 
-Do not substitute another pose, neutralize the pose, use a canonical master as the pose source, warp a different frame, interpolate, mirror, crop, enlarge, recenter, redesign, recolor, or alter equipment.
+Use the separately approved canonical color reference only for palette, material colors, and rendering consistency. It is appearance-only and must not alter this mapped frame's pose, silhouette, geometry, scale, framing, eye state, or equipment angles.
+
+Do not substitute another pose, neutralize the pose, use a canonical master as the pose source, warp a different frame, interpolate, mirror, crop, enlarge, recenter, redesign, or alter equipment. Do not invent colors outside the approved canonical reference.
 ```
 
-If a secondary appearance reference is supplied, state explicitly that it may guide only cleanup/style fidelity and cannot override the mapped source frame’s pose or geometry.
+For GPT Image batch work, the approved canonical color reference is mandatory as a secondary appearance reference. State explicitly that it guides only palette/material appearance and cleanup fidelity and cannot override the mapped source frame’s pose or geometry.
 
 ## Targeted retry
 

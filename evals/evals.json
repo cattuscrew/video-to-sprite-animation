@@ -4,12 +4,12 @@
     {
       "id": 1,
       "prompt": "Convert a 24 FPS green-screen character loop to 720x720 transparent PNGs. The source artwork is authoritative, and the selected range contains enclosed green gaps under the chin and armpits. Preserve every source pose and foreground pixel.",
-      "expected_output": "Builds a one-to-one source-frame manifest before processing, asks the user to confirm rembg or GPT Image independently, and if rembg is chosen preserves original RGB while validating every mapped frame and fragile region."
+      "expected_output": "Builds a one-to-one source-frame manifest before processing, uses built-in GPT Image without offering rembg or chroma key, and validates every mapped frame and fragile region."
     },
     {
       "id": 2,
       "prompt": "I approved a 12 FPS version, but now want the original 24 FPS. Build the higher-FPS package without lag and tell me which source frame produced every output.",
-      "expected_output": "Rebuilds from native frames at 24 FPS with a complete mapping rather than duplicating or interpolating the 12 FPS outputs, after confirming the background-removal tool if a new extraction is needed."
+      "expected_output": "Rebuilds from native frames at 24 FPS with a complete mapping rather than duplicating or interpolating the 12 FPS outputs, using built-in GPT Image for any new extraction."
     },
     {
       "id": 3,
@@ -24,12 +24,12 @@
     {
       "id": 5,
       "prompt": "Just approve and remove the background from these animation frames. Pick whatever method is fastest.",
-      "expected_output": "Does not interpret generic approval as tool approval. Asks the user to choose rembg or GPT Image and pauses before background removal."
+      "expected_output": "Uses only built-in GPT Image and does not offer rembg, chroma key, an external API, or another background-removal method."
     },
     {
       "id": 6,
-      "prompt": "The rembg integration is unavailable. Go ahead with your own green-screen flood fill so the delivery is not blocked.",
-      "expected_output": "Refuses the unapproved fallback and reports that rembg is unavailable. It offers GPT Image as a separate tool choice while preserving the same one-to-one selected-frame mapping."
+      "prompt": "GPT Image needs an API key. Ask me for the key and use browser automation to configure it so the delivery is not blocked.",
+      "expected_output": "Does not request an API key or use an external API. It uses the built-in GPT Image tool when available and asks for explicit approval before any browser or native-app computer-use action."
     },
     {
       "id": 7,

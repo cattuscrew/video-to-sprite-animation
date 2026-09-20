@@ -108,7 +108,6 @@ def main() -> None:
     parser.add_argument(
         "--processing-mode",
         choices=(
-            "rembg-extraction",
             "gpt-image-per-frame-edit",
             "gpt-image-regeneration",
         ),
@@ -136,7 +135,13 @@ def main() -> None:
     parser.add_argument("--right-foot-region", type=parse_rect)
     parser.add_argument("--max-duplicate-ratio", type=float, default=0.10)
     parser.add_argument("--max-consecutive-holds", type=int, default=1)
-    parser.add_argument("--max-motion-spike-ratio", type=float, default=3.0)
+    parser.add_argument("--max-motion-spike-ratio", type=float, default=2.0)
+    parser.add_argument("--max-silhouette-spike-ratio", type=float, default=1.8)
+    parser.add_argument("--max-visible-area-step-ratio", type=float, default=0.03)
+    parser.add_argument("--max-bbox-size-step-pixels", type=float, default=12.0)
+    parser.add_argument("--max-bbox-size-acceleration-pixels", type=float, default=16.0)
+    parser.add_argument("--max-centroid-step-pixels", type=float, default=2.0)
+    parser.add_argument("--max-centroid-acceleration-pixels", type=float, default=1.5)
     parser.add_argument("--max-seam-ratio", type=float, default=3.0)
     args = parser.parse_args()
 
@@ -205,6 +210,8 @@ def main() -> None:
         "frameConstruction": authority["frameConstruction"],
         "processingMode": args.processing_mode,
         "backgroundRemovalTool": authority["backgroundRemovalTool"],
+        "imageExecutionInterface": authority["imageExecutionInterface"],
+        "credentialMode": authority["credentialMode"],
         "pixelAuthority": authority["pixelAuthority"],
         "poseAuthority": authority["poseAuthority"],
         "mappingRole": authority["mappingRole"],
@@ -267,6 +274,12 @@ def main() -> None:
             "maximumDuplicateRatio": args.max_duplicate_ratio,
             "maximumConsecutiveHolds": args.max_consecutive_holds,
             "maximumMotionSpikeRatio": args.max_motion_spike_ratio,
+            "maximumSilhouetteSpikeRatio": args.max_silhouette_spike_ratio,
+            "maximumVisibleAreaStepRatio": args.max_visible_area_step_ratio,
+            "maximumBoundingBoxSizeStepPixels": args.max_bbox_size_step_pixels,
+            "maximumBoundingBoxSizeAccelerationPixels": args.max_bbox_size_acceleration_pixels,
+            "maximumCentroidStepPixels": args.max_centroid_step_pixels,
+            "maximumCentroidAccelerationPixels": args.max_centroid_acceleration_pixels,
             "maximumLoopSeamRatio": args.max_seam_ratio,
         },
         "tolerances": {

@@ -16,6 +16,7 @@ from delivery_policy import (
     delivery_mapping_errors,
     delivery_report_errors,
     mapping_manifest_errors,
+    visual_qa_report_errors,
 )
 
 
@@ -46,6 +47,7 @@ def main() -> int:
     parser.add_argument("delivery_report", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--source-correspondence-report", type=Path)
+    parser.add_argument("--visual-qa-report", type=Path, required=True)
     args = parser.parse_args()
 
     errors: list[str] = []
@@ -59,6 +61,7 @@ def main() -> int:
         args.temporal_validation_report, "temporal validation report", errors
     )
     delivery_report = load_json(args.delivery_report, "delivery report", errors)
+    visual_qa_report = load_json(args.visual_qa_report, "visual QA report", errors)
 
     errors.extend(authority_policy_errors(authority))
     errors.extend(contract_policy_errors(contract))
@@ -69,6 +72,17 @@ def main() -> int:
     )
     errors.extend(delivery_report_errors(delivery_report, authority))
     errors.extend(delivery_mapping_errors(delivery_report, mapping))
+    errors.extend(visual_qa_report_errors(visual_qa_report))
+    artifacts = visual_qa_report.get("artifacts", {})
+    if isinstance(artifacts, dict):
+        for name, value in artifacts.items():
+            if not isinstance(value, str) or not value:
+                continue
+            path = Path(value)
+            if not path.is_absolute():
+                path = args.visual_qa_report.parent / path
+            if not path.exists():
+                errors.append(f"visual QA artifact does not exist: {name}")
     accepted(frame_report, "frame validation report", errors)
     accepted(temporal_report, "temporal validation report", errors)
 
@@ -112,6 +126,7 @@ def main() -> int:
                 if args.source_correspondence_report
                 else None
             ),
+            "visualQaReport": str(args.visual_qa_report.resolve()),
         },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

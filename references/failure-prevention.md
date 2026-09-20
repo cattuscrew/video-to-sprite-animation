@@ -2,9 +2,9 @@
 
 ## Separate frame provenance from background removal
 
-The selected video frames determine motion and pose. The chosen background tool determines how each mapped frame is cleaned. Do not infer one from the other.
+The selected video frames determine motion and pose. The fixed built-in GPT Image policy determines how each mapped frame is cleaned; it never changes frame provenance.
 
-For one-to-one processing, build `source-frame-manifest.json` before any background work. Both rembg and GPT Image use this manifest. Output N must use the exact source file and SHA-256 recorded for output N.
+For one-to-one processing, build `source-frame-manifest.json` before any background work. Built-in GPT Image uses this manifest. Output N must use the exact source file and SHA-256 recorded for output N.
 
 Use `motion-reference-manifest.json` only after explicit approval for synthesized motion. A frame used for centroids, landmarks, flow, interpolation, or master warping is merely a motion reference.
 
@@ -12,13 +12,25 @@ Use `motion-reference-manifest.json` only after explicit approval for synthesize
 
 Reject one-to-one delivery when any selected frame is skipped, duplicated, reordered, held, interpolated, or replaced. Reject a GPT sequence created from one master even if its movement was measured from every source frame. Smoothness and correct frame count do not establish correspondence.
 
-For GPT Image, process every selected native frame individually and review every source/output pair. For rembg, preserve native RGB and geometry and validate exact visible-pixel identity.
+Process every selected native frame individually with built-in GPT Image and review every source/output pair.
 
-## Require a background-tool decision
+## Fix the background tool and credential boundary
 
-Before background removal, ask the user to confirm `rembg` or `GPT Image`. Do not infer the choice from generic approval. If the selected tool is unavailable, stop; never substitute color-keying, flood-fill, OpenCV keying, or a custom extractor.
+Use only the built-in GPT Image generation/editing tool. Do not offer rembg, chroma/color keying, flood-fill, OpenCV keying, a custom extractor, or an external image API. Never request or configure an API key. If the built-in tool is unavailable, stop and report the blocker without asking for credentials or silently changing methods.
 
-Approval is scoped. Record source-range approval, tool approval, proof approval, accepted foreground-pixel policy, and whether synthesized motion is allowed. Proof transparency approval does not authorize master warping or pose replacement.
+Before invoking computer-use tooling to control any browser or native app, describe the specific action, ask for explicit approval, and wait. Keep that approval scoped to the named action; other workflow approvals do not authorize computer use.
+
+Approval is scoped. Record source-range approval, the fixed built-in GPT Image policy, proof approval, accepted foreground-pixel policy, and whether synthesized motion is allowed. Proof transparency approval does not authorize master warping, pose replacement, external API access, or computer use.
+
+## Ask one decision at a time
+
+Before source processing, ask exactly one unresolved choice and wait. Do not combine FPS, canvas, loop, tool, proof, color reference, and batch authorization into one checklist or multi-question prompt. An answer approves only the named decision. Read-only skill loading and resolving the explicitly supplied input path are allowed before the first answer; source inspection, extraction, generation, and mutation are not.
+
+For GPT Image, transparency proof, canonical color reference, color-consistency strategy, and batch execution are four separate gates. A generic “approve” applies only to the single question currently shown.
+
+## Prevent independent-frame color drift
+
+Before a GPT Image batch, select and separately approve one canonical color reference. Store its path, SHA-256, and `role: appearance-only`; never use it as pose authority. Offer `reference-guided-gpt` and `reference-guided-gpt-with-deterministic-palette-normalization` as separate choices, recommending the latter when temporal color consistency matters. The deterministic pass may change foreground RGB only; it must preserve alpha, outlines, geometry, placement, and the exact source-frame mapping.
 
 ## Preserve cadence and fragile regions
 
@@ -38,3 +50,9 @@ Final acceptance requires:
 - `validate_delivery_package.py` acceptance.
 
 Global bounds, pivot, palette, edge density, seam energy, or temporal smoothness cannot replace these checks.
+
+## Prevent subtle independent-redraw jitter
+
+Do not accept GPT frames from global motion energy alone. Use the contract's local silhouette-change, visible-area, bounding-box-size, centroid-step, and second-difference acceleration limits. Default motion-spike rejection is 2.0× median rather than the legacy 3.0× limit; local silhouette rejection is 1.8× median. Treat thresholds as rejection triggers, not proof of quality.
+
+Inspect every triggered previous/current/next triplet and the complete alpha-onion sheet. Compare the suspected output with its exact mapped source before repair. Repair only the affected mapped frame from that source; keep the approved appearance reference secondary and do not substitute, warp, hold, or recenter another output. Re-run frame, source-correspondence, temporal, color, and delivery gates after repair.

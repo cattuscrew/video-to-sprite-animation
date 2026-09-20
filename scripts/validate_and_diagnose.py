@@ -210,17 +210,12 @@ def main() -> int:
                     errors.append(f"semantic region {name} is outside the canvas")
                     continue
                 protected = master_alpha_region > 18
-                if contract.get("processingMode") == "rembg-extraction":
-                    missing = int(np.count_nonzero(protected & (current_alpha <= 18)))
-                    if missing:
-                        errors.append(f"semantic region {name} missing protected pixels={missing}")
-                else:
-                    reference_coverage = int(np.count_nonzero(protected))
-                    current_coverage = int(np.count_nonzero(current_alpha > 18))
-                    ratio = current_coverage / max(1, reference_coverage)
-                    minimum = float(tolerance.get("minimumSemanticCoverageRatio", 0.60))
-                    if ratio < minimum:
-                        errors.append(f"semantic region {name} coverage ratio={ratio:.3f}")
+                reference_coverage = int(np.count_nonzero(protected))
+                current_coverage = int(np.count_nonzero(current_alpha > 18))
+                ratio = current_coverage / max(1, reference_coverage)
+                minimum = float(tolerance.get("minimumSemanticCoverageRatio", 0.60))
+                if ratio < minimum:
+                    errors.append(f"semantic region {name} coverage ratio={ratio:.3f}")
 
         record = {
             "frame": path.name,
