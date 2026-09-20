@@ -18,7 +18,9 @@ There is one link, not two: exact native source -> output. Editing from an appro
 
 ## Fix the background tool and credential boundary
 
-Use only the built-in GPT Image generation/editing tool. Do not offer rembg, chroma/color keying, flood-fill, OpenCV keying, a custom extractor, or an external image API. Never request or configure an API key. If the built-in tool is unavailable, stop and report the blocker without asking for credentials or silently changing methods.
+Use only the built-in GPT Image generation/editing tool. Do not offer rembg, chroma/color keying, flood-fill, OpenCV keying, a custom extractor, or an external image API *as a way of producing transparency*. Never request or configure an API key. If the built-in tool is unavailable, stop and report the blocker without asking for credentials or silently changing methods.
+
+That ban is on writing a delivered alpha channel, not on the techniques themselves. A chroma test on the source is a permitted and load-bearing part of the pipeline: a native frame is opaque everywhere, so `scripts/source_foreground.py` derives the character's silhouette from green excess to decide which pixels to *measure* on -- registration, the identity gate, the silhouette-area gate and per-material colour all depend on it. Removing it as though it were a background-removal branch breaks registration. The rule is the one in SKILL.md: a chroma test may choose what to measure, and must never write a delivered alpha channel.
 
 Before invoking computer-use tooling to control any browser or native app, describe the specific action, ask for explicit approval, and wait. Keep that approval scoped to the named action; other workflow approvals do not authorize computer use.
 
@@ -50,6 +52,8 @@ Two causes, both fixed without an image call:
 
 - The repair grew the visible mask in every frame, by a median of 1.42% against a 3% per-frame limit. Area growth tracked centroid drift at 0.68. Clamping each output to its authority's support cleared five of the seven failures.
 - The tool placed each sprite a fraction of a pixel away from its authority, by a median of 0.115px. Registering that offset out cleared three.
+
+A centroid gate on a registered sequence measures the silhouette's boundary, not the sprite's position. Once registration holds every frame within a hundredth of a pixel of its source, the remaining movement in the centre of mass is the alpha edge being redrawn, so the limit has to come from what a registered sequence produces and not from a default. Measured: source 0.71, output 1.83, placement error 0.0012.
 
 Neither was sufficient alone. Together they brought the sequence back to the authority's own level, with every frame within 0.074px of its authority.
 

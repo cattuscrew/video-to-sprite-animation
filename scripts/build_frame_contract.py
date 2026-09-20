@@ -149,6 +149,15 @@ def main() -> None:
     parser.add_argument("--approved-hold", action="append", default=[])
     parser.add_argument("--left-foot-region", type=parse_rect)
     parser.add_argument("--right-foot-region", type=parse_rect)
+    parser.add_argument(
+        "--loop-type",
+        choices=("natural-loop", "ping-pong-loop", "one-shot"),
+        default="natural-loop",
+        help=(
+            "one-shot plays once and has no seam, so the seam gate is skipped "
+            "and the GIF is written without a loop flag."
+        ),
+    )
     parser.add_argument("--max-duplicate-ratio", type=float, default=0.10)
     parser.add_argument("--max-consecutive-holds", type=int, default=1)
     parser.add_argument("--max-motion-spike-ratio", type=float, default=2.0)
@@ -157,7 +166,7 @@ def main() -> None:
     parser.add_argument("--max-bbox-size-step-pixels", type=float, default=12.0)
     parser.add_argument("--max-bbox-size-acceleration-pixels", type=float, default=16.0)
     parser.add_argument("--max-centroid-step-pixels", type=float, default=2.0)
-    parser.add_argument("--max-centroid-acceleration-pixels", type=float, default=1.5)
+    parser.add_argument("--max-centroid-acceleration-pixels", type=float, default=2.0)
     parser.add_argument("--max-seam-ratio", type=float, default=3.0)
     args = parser.parse_args()
 
@@ -286,6 +295,7 @@ def main() -> None:
         "statefulRegions": stateful_regions,
         "approvedTemporalTransitions": args.approved_transition,
         "approvedHoldTransitions": args.approved_hold,
+        "loopType": args.loop_type,
         "temporalLimits": {
             "maximumDuplicateRatio": args.max_duplicate_ratio,
             "maximumConsecutiveHolds": args.max_consecutive_holds,

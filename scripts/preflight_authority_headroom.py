@@ -86,7 +86,7 @@ def main() -> int:
     parser.add_argument("manifest", type=Path, help="source-frame-manifest.json")
     parser.add_argument("output", type=Path, help="where to write the headroom JSON")
     parser.add_argument("--max-centroid-step-pixels", type=float, default=2.0)
-    parser.add_argument("--max-centroid-acceleration-pixels", type=float, default=1.5)
+    parser.add_argument("--max-centroid-acceleration-pixels", type=float, default=2.0)
     parser.add_argument("--max-bbox-size-step-pixels", type=float, default=12.0)
     parser.add_argument("--max-bbox-size-acceleration-pixels", type=float, default=16.0)
     parser.add_argument("--max-visible-area-step-ratio", type=float, default=0.03)

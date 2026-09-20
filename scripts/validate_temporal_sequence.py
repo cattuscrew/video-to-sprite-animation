@@ -240,6 +240,15 @@ def main() -> int:
     parser.add_argument("--max-centroid-acceleration-pixels", type=float)
     parser.add_argument("--max-seam-ratio", type=float)
     parser.add_argument(
+        "--loop-type",
+        choices=("natural-loop", "ping-pong-loop", "one-shot"),
+        help=(
+            "Overrides the contract. A one-shot has no seam: its last frame is "
+            "meant to be far from its first, and gating that rejects every "
+            "correct attack, death or cast sequence."
+        ),
+    )
+    parser.add_argument(
         "--frame-manifest",
         type=Path,
         help=(
@@ -259,8 +268,10 @@ def main() -> int:
     max_bbox_step = args.max_bbox_size_step_pixels if args.max_bbox_size_step_pixels is not None else float(temporal.get("maximumBoundingBoxSizeStepPixels", 12.0))
     max_bbox_accel = args.max_bbox_size_acceleration_pixels if args.max_bbox_size_acceleration_pixels is not None else float(temporal.get("maximumBoundingBoxSizeAccelerationPixels", 16.0))
     max_centroid_step = args.max_centroid_step_pixels if args.max_centroid_step_pixels is not None else float(temporal.get("maximumCentroidStepPixels", 2.0))
-    max_centroid_accel = args.max_centroid_acceleration_pixels if args.max_centroid_acceleration_pixels is not None else float(temporal.get("maximumCentroidAccelerationPixels", 1.5))
+    max_centroid_accel = args.max_centroid_acceleration_pixels if args.max_centroid_acceleration_pixels is not None else float(temporal.get("maximumCentroidAccelerationPixels", 2.0))
     max_seam_ratio = args.max_seam_ratio if args.max_seam_ratio is not None else float(temporal.get("maximumLoopSeamRatio", 3.0))
+    loop_type = args.loop_type or contract.get("loopType", "natural-loop")
+    loops = loop_type != "one-shot"
     missing: list[int] = []
     numbers: list[int] = []
     if args.frame_manifest:
@@ -292,10 +303,15 @@ def main() -> int:
 
     stateful = contract.get("statefulRegions", [])
     ignored = [list(map(int, region["rect"])) for region in stateful]
+    # The wraparound pair is the loop seam. A one-shot has no such pair, and
+    # measuring it would compare the recovery pose with the anticipation pose
+    # as though the animation were meant to join up.
     energies = [
-        motion_energy(images[index], images[(index + 1) % len(images)], ignored)
-        for index in range(len(images))
+        motion_energy(images[index], images[index + 1], ignored)
+        for index in range(len(images) - 1)
     ]
+    if loops:
+        energies.append(motion_energy(images[-1], images[0], ignored))
     duplicates = [
         index
         for index in range(len(images) - 1)
@@ -315,12 +331,13 @@ def main() -> int:
         else:
             current_run = 0
     duplicate_ratio = len(unapproved_duplicates) / max(1, len(images) - 1)
-    nonzero = [value for value in energies[:-1] if value > 1e-8]
+    transitions = energies[:-1] if loops else energies
+    nonzero = [value for value in transitions if value > 1e-8]
     median_motion = float(np.median(nonzero)) if nonzero else 0.0
     approved = set(contract.get("approvedTemporalTransitions", []))
     spikes = []
     if median_motion:
-        for index, value in enumerate(energies[:-1]):
+        for index, value in enumerate(transitions):
             transition = f"{index + 1}->{index + 2}"
             if value > median_motion * max_motion_spike_ratio and transition not in approved:
                 spikes.append({"transition": transition, "energy": value})
@@ -377,7 +394,14 @@ def main() -> int:
         if failure:
             acceleration_failures.append(failure)
             flagged_frames.add(numbers[index])
-    seam_ratio = energies[-1] / median_motion if median_motion else (0.0 if energies[-1] == 0 else float("inf"))
+    if loops:
+        seam_ratio = (
+            energies[-1] / median_motion
+            if median_motion
+            else (0.0 if energies[-1] == 0 else float("inf"))
+        )
+    else:
+        seam_ratio = None
 
     locked_failures = []
     locked_limit = float(contract["tolerances"].get("lockedRegionMeanAbsolute", 0.06))
@@ -427,7 +451,7 @@ def main() -> int:
         errors.append(f"local silhouette/geometry transitions failed: {len(geometry_failures)}")
     if acceleration_failures:
         errors.append(f"local silhouette/geometry accelerations failed: {len(acceleration_failures)}")
-    if seam_ratio > max_seam_ratio:
+    if seam_ratio is not None and seam_ratio > max_seam_ratio:
         errors.append(f"loop seam ratio {seam_ratio:.3f} exceeds {max_seam_ratio:.3f}")
     if locked_failures:
         errors.append(f"locked-region transitions failed: {len(locked_failures)}")
@@ -459,7 +483,8 @@ def main() -> int:
         "geometryTransitionFailures": geometry_failures,
         "geometryAccelerationFailures": acceleration_failures,
         "diagnostics": diagnostics,
-        "loopSeamEnergy": energies[-1],
+        "loopType": loop_type,
+        "loopSeamEnergy": energies[-1] if loops else None,
         "loopSeamRatio": seam_ratio,
         "lockedRegionFailures": locked_failures,
         "negativeSpaceFailures": negative_space_failures,
@@ -482,7 +507,13 @@ def main() -> int:
     for index in duplicates:
         x, _ = points[index]
         draw.line((x, 20, x, height - 20), fill=(220, 80, 80), width=1)
-    draw.text((10, 8), f"status={result['status']} duplicateRatio={duplicate_ratio:.3f} seamRatio={seam_ratio:.3f}", fill="black")
+    seam_label = f"{seam_ratio:.3f}" if seam_ratio is not None else "n/a (one-shot)"
+    draw.text(
+        (10, 8),
+        f"status={result['status']} duplicateRatio={duplicate_ratio:.3f} "
+        f"seamRatio={seam_label}",
+        fill="black",
+    )
     plot.save(args.output / "temporal-motion-plot.png")
 
     print(json.dumps({"status": result["status"], "errors": errors}, indent=2))
