@@ -42,6 +42,19 @@ At native FPS, use every mapped frame once. At lower FPS, record the explicit na
 
 Inspect the full outline and named fragile regions: both sides under the chin, armpits, hair/shoulder gaps, hands and weapons, equipment boundaries, boots, and enclosed negative spaces. Inspect the complete numbered batch, not only one proof frame.
 
+## Prevent late temporal failure
+
+Per-frame limits and sequence limits fail differently, and a frame can pass every per-frame gate while making the sequence fail. On the 2026-09-20 run all 48 frames passed alpha repair, and the temporal gate then failed on two transitions and five accelerations, discovered at minute 100 of 103.
+
+Two causes, both fixed without an image call:
+
+- The repair grew the visible mask in every frame, by a median of 1.42% against a 3% per-frame limit. Area growth tracked centroid drift at 0.68. Clamping each output to its authority's support cleared five of the seven failures.
+- The tool placed each sprite a fraction of a pixel away from its authority, by a median of 0.115px. Registering that offset out cleared three.
+
+Neither was sufficient alone. Together they brought the sequence back to the authority's own level, with every frame within 0.074px of its parent.
+
+Run the sequence gates as frames land, not once at the end, and run `scripts/preflight_parent_headroom.py` before the first image call: where an authority transition has already spent its budget, no per-frame accuracy will save it.
+
 ## Close the validation blind spot
 
 Final acceptance requires:

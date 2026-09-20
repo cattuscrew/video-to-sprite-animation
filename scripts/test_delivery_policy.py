@@ -249,5 +249,69 @@ class DeliveryPolicyTests(unittest.TestCase):
         self.assertTrue(any("onionSkinReviewed" in error for error in visual_qa_report_errors(report)))
 
 
+class RetryBudgetTests(unittest.TestCase):
+    """Budgets are optional, but a stated one must be usable."""
+
+    def test_absent_budgets_stay_valid(self) -> None:
+        self.assertEqual(authority_policy_errors(alpha_authority()), [])
+
+    def test_both_kinds_are_accepted(self) -> None:
+        record = alpha_authority()
+        record["approvalScope"]["retryBudgets"] = {"safetyBlock": 4, "quality": 2}
+        self.assertEqual(authority_policy_errors(record), [])
+
+    def test_a_single_shared_budget_is_rejected(self) -> None:
+        record = alpha_authority()
+        record["approvalScope"]["retryBudgets"] = {"safetyBlock": 4}
+        self.assertTrue(
+            any("missing quality" in e for e in authority_policy_errors(record))
+        )
+
+    def test_a_negative_budget_is_rejected(self) -> None:
+        record = alpha_authority()
+        record["approvalScope"]["retryBudgets"] = {"safetyBlock": -1, "quality": 2}
+        self.assertTrue(
+            any("non-negative" in e for e in authority_policy_errors(record))
+        )
+
+    def test_an_unknown_budget_kind_is_rejected(self) -> None:
+        record = alpha_authority()
+        record["approvalScope"]["retryBudgets"] = {
+            "safetyBlock": 4,
+            "quality": 2,
+            "vibes": 9,
+        }
+        self.assertTrue(any("unknown kinds" in e for e in authority_policy_errors(record)))
+
+
+class RegistrationPolicyTests(unittest.TestCase):
+    def test_absent_policy_stays_valid(self) -> None:
+        self.assertEqual(authority_policy_errors(alpha_authority()), [])
+
+    def test_translation_policy_needs_a_limit(self) -> None:
+        record = alpha_authority()
+        record["registrationPolicy"] = {"type": "translation-only-to-authority"}
+        self.assertTrue(any("maxPixels" in e for e in authority_policy_errors(record)))
+
+    def test_declared_translation_policy_is_accepted(self) -> None:
+        record = alpha_authority()
+        record["registrationPolicy"] = {
+            "type": "translation-only-to-authority",
+            "maxPixels": 2.0,
+        }
+        record["mattePolicy"] = "never-exceeds-authority-support"
+        self.assertEqual(authority_policy_errors(record), [])
+
+    def test_an_invented_registration_type_is_rejected(self) -> None:
+        record = alpha_authority()
+        record["registrationPolicy"] = {"type": "per-frame-recentering", "maxPixels": 2.0}
+        self.assertTrue(any("registrationPolicy type" in e for e in authority_policy_errors(record)))
+
+    def test_an_invented_matte_policy_is_rejected(self) -> None:
+        record = alpha_authority()
+        record["mattePolicy"] = "whatever-the-tool-returns"
+        self.assertTrue(any("mattePolicy" in e for e in authority_policy_errors(record)))
+
+
 if __name__ == "__main__":
     unittest.main()

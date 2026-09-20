@@ -123,6 +123,8 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
                 errors.append("color-consistency strategy is not explicitly approved")
             if approval.get("batchExecutionApproved") is not True:
                 errors.append("GPT Image batch execution is not explicitly approved")
+            errors.extend(retry_budget_errors(approval))
+            errors.extend(registration_policy_errors(authority))
     else:
         if not authority.get("canonicalMaster"):
             errors.append("synthesized authority is missing canonicalMaster")
@@ -132,6 +134,74 @@ def authority_policy_errors(authority: dict[str, Any]) -> list[str]:
             errors.append("synthesized processing must use motionReferenceManifest")
         if approval.get("synthesizedMotionApproved") is not True:
             errors.append("synthesized motion is not explicitly approved")
+    return errors
+
+
+RETRY_BUDGET_KINDS = ("safetyBlock", "quality")
+
+REGISTRATION_POLICIES = {
+    "translation-only-to-authority",
+    "not-applied",
+}
+
+MATTE_POLICIES = {
+    "never-exceeds-authority-support",
+    "unconstrained",
+}
+
+
+def retry_budget_errors(approval: dict[str, Any]) -> list[str]:
+    """Retry budgets are optional, but a stated one must be usable.
+
+    The two kinds are counted separately because they mean different things: an
+    output-stage moderation block says nothing about the frame, while a failed
+    gate says everything about it. One shared number lets random blocks eat the
+    budget meant for real defects.
+    """
+    budgets = approval.get("retryBudgets")
+    if budgets is None:
+        return []
+    if not isinstance(budgets, dict):
+        return ["approvalScope retryBudgets must be an object"]
+    errors: list[str] = []
+    for kind in RETRY_BUDGET_KINDS:
+        if kind not in budgets:
+            errors.append(f"retryBudgets is missing {kind}")
+            continue
+        value = budgets[kind]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            errors.append(f"retryBudgets {kind} must be a non-negative integer")
+    unknown = set(budgets) - set(RETRY_BUDGET_KINDS)
+    if unknown:
+        errors.append(f"retryBudgets has unknown kinds: {sorted(unknown)}")
+    return errors
+
+
+def registration_policy_errors(authority: dict[str, Any]) -> list[str]:
+    """Registration and matte policy are optional, but must be declared honestly.
+
+    Translation onto a frame's own authority is not per-frame recentering: the
+    offset is measured against that frame's approved parent or mapped source,
+    never against a neighbour, and never changes scale or rotation.
+    """
+    errors: list[str] = []
+    registration = authority.get("registrationPolicy")
+    if registration is not None:
+        if not isinstance(registration, dict):
+            return ["registrationPolicy must be an object"]
+        kind = registration.get("type")
+        if kind not in REGISTRATION_POLICIES:
+            errors.append(
+                f"registrationPolicy type must be one of {sorted(REGISTRATION_POLICIES)}"
+            )
+        if kind == "translation-only-to-authority":
+            limit = registration.get("maxPixels")
+            if not isinstance(limit, (int, float)) or isinstance(limit, bool) or limit <= 0:
+                errors.append("registrationPolicy maxPixels must be a positive number")
+
+    matte = authority.get("mattePolicy")
+    if matte is not None and matte not in MATTE_POLICIES:
+        errors.append(f"mattePolicy must be one of {sorted(MATTE_POLICIES)}")
     return errors
 
 
