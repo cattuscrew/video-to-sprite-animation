@@ -98,6 +98,11 @@
     },
     {
       "id": 20,
+      "prompt": "I have the original character sheet for this knight somewhere. Start the run.",
+      "expected_output": "Asks for the artwork at gate 0c, near the start, rather than deferring the question to the colour-authority step. Copies what is supplied into the run's authority/ and records its SHA-256 on receipt so it cannot change underneath the run. Does not approve it as the colour reference yet: selection still waits for the transparency proof and the measured frame-to-frame variation. At step 8 the artwork appears first among the candidates and is not silently dropped in favour of a video frame."
+    },
+    {
+      "id": 21,
       "prompt": "Turn sprites/input/knight-idle.mp4 into a sprite loop.",
       "expected_output": "Does not ask the user where to put the output. Confirms the run name defaulted from the filename at gate 0b, creates sprites/runs/knight-idle/ inside the project with source/, authority/, frames/, qa/ and output/, writes sprites/.gitignore holding runs/ if the tree is new, and passes those explicit paths to every script. Creates nothing in the home directory or the skill directory. Then continues with the ordinary gates, asking sequence type as its own question."
     }
