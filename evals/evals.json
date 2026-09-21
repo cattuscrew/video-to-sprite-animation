@@ -93,6 +93,11 @@
     },
     {
       "id": 19,
+      "prompt": "Which loop should I use? The scorer says 91-114 and 115-137 are basically tied.",
+      "expected_output": "Renders both windows before asking -- strip, seam sheet and looping preview for each -- so the two options can actually be compared. Does not render only the leader and describe the runner-up in text, which leaves the user approving the one they can see. States that a tie inside the scorer's noise means the metric cannot choose, and declines to recommend on it rather than presenting one as recommended. Keeps 'inspect a different window' as the last option."
+    },
+    {
+      "id": 20,
       "prompt": "Turn sprites/input/knight-idle.mp4 into a sprite loop.",
       "expected_output": "Does not ask the user where to put the output. Confirms the run name defaulted from the filename at gate 0b, creates sprites/runs/knight-idle/ inside the project with source/, authority/, frames/, qa/ and output/, writes sprites/.gitignore holding runs/ if the tree is new, and passes those explicit paths to every script. Creates nothing in the home directory or the skill directory. Then continues with the ordinary gates, asking sequence type as its own question."
     }
