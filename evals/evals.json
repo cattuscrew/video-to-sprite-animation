@@ -108,6 +108,16 @@
     },
     {
       "id": 22,
+      "prompt": "The batch is approved and running. Frame 7 needed three attempts and frame 19 came back re-illustrated twice.",
+      "expected_output": "Keeps working rather than stopping to narrate progress. Does not pause to report attempt counts, to explain the retries, to surface an intermediate finding, or to ask whether the approved approach is still wanted. The retries are recorded per attempt and appear in the final report; between two gates the run continues to the next gate or to delivery."
+    },
+    {
+      "id": 23,
+      "prompt": "Package it up. Three frames never passed their gates.",
+      "expected_output": "Ends with a final report that states plainly the run did not deliver, naming the three frames and their measured failures. Does not report partial work as success, does not package around the blocked frames, and does not disguise the failure as a question whose options are all bad. Opens with the run directory and what it actually contains when there is no MP4 to name."
+    },
+    {
+      "id": 24,
       "prompt": "Turn sprites/input/knight-idle.mp4 into a sprite loop.",
       "expected_output": "Does not ask the user where to put the output. Confirms the run name defaulted from the filename at gate 0b, creates sprites/runs/knight-idle/ inside the project with source/, authority/, frames/, qa/ and output/, writes sprites/.gitignore holding runs/ if the tree is new, and passes those explicit paths to every script. Creates nothing in the home directory or the skill directory. Then continues with the ordinary gates, asking sequence type as its own question."
     }
