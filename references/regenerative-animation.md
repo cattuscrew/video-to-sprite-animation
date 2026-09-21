@@ -1,6 +1,6 @@
 # Synthesized motion
 
-Use this exception only when the user explicitly approves frames that do not correspond one-to-one with the selected video frames.
+Reaching this page does not mean the exception is available. It is open only when the user raised it themselves, unprompted, asking for frames that do not correspond one-to-one with the selected video frames. Never offer it, never list it beside `one-to-one-source` as a choice, and never propose it to rescue frames that keep failing. If the user has not raised it in their own words, close this page and stay one-to-one.
 
 Examples include deforming one master from tracked centroids, landmarks, mesh, or optical flow; generating new poses; interpolation; or holding/reusing frames. Set `frameConstruction: synthesized`, build `motion-reference-manifest.json`, and classify every output as `source-derived-deformation`, `generated`, `interpolated`, or `held/reused`.
 

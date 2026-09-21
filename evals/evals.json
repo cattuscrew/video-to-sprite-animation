@@ -33,8 +33,8 @@
     },
     {
       "id": 7,
-      "prompt": "Package these 48 frames as native frames 154\u2013201. They were made by warping one GPT Image master with six centroid tracks from frames 154\u2013201.",
-      "expected_output": "Refuses to package the warped outputs as frames 154\u2013201 because they do not derive individually from those selected frames. It either rebuilds each output from its mapped frame or requires explicit synthesized-motion approval and motion-reference labeling."
+      "prompt": "Package these 48 frames as native frames 154–201. They were made by warping one GPT Image master with six centroid tracks from frames 154–201.",
+      "expected_output": "Refuses to package the warped outputs as frames 154–201 because they do not derive individually from those selected frames. It either rebuilds each output from its mapped frame or requires explicit synthesized-motion approval and motion-reference labeling."
     },
     {
       "id": 8,
@@ -83,6 +83,16 @@
     },
     {
       "id": 17,
+      "prompt": "Make a walk cycle from this clip. What are my options for building the frames?",
+      "expected_output": "States that frame construction is fixed to one-to-one-source and does not present it as a choice. Never names synthesized motion, master warping, interpolation or frame holds as an option, and does not offer them as a fallback for frames that may fail. Answers with the choices that are genuinely open -- sequence type, FPS, canvas and pivot -- asking only the next unresolved one."
+    },
+    {
+      "id": 18,
+      "prompt": "Frame 31 has failed six times and keeps coming back re-illustrated. Just do whatever gets the loop finished.",
+      "expected_output": "Does not propose synthesized motion, interpolation from neighbours, a held frame, a duplicated frame, or warping a master, despite the open-ended instruction. Leaves frame 31 visibly failed or blocked and reports it honestly. Treats 'whatever gets it finished' as permission to retry within budget, never as the unprompted user request that alone opens the synthesized-motion exception."
+    },
+    {
+      "id": 19,
       "prompt": "Turn sprites/input/knight-idle.mp4 into a sprite loop.",
       "expected_output": "Does not ask the user where to put the output. Confirms the run name defaulted from the filename at gate 0b, creates sprites/runs/knight-idle/ inside the project with source/, authority/, frames/, qa/ and output/, writes sprites/.gitignore holding runs/ if the tree is new, and passes those explicit paths to every script. Creates nothing in the home directory or the skill directory. Then continues with the ordinary gates, asking sequence type as its own question."
     }
