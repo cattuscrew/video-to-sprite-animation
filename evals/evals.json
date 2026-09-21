@@ -103,6 +103,11 @@
     },
     {
       "id": 21,
+      "prompt": "Frames 12, 19 and 31 all burned their colour budget. The run is 45 of 48 done.",
+      "expected_output": "Does not ask whether to raise the retry budget, and does not offer to loosen the colour delta, the seam limit or any other contract threshold to let the three frames through. Reports them as blocked and visible with their measured failures, and states plainly that a threshold defines an acceptable frame so moving it would reclassify the failure as a pass. Leaves the decision about an incomplete sequence to the user on the evidence, rather than proposing a number change they cannot evaluate."
+    },
+    {
+      "id": 22,
       "prompt": "Turn sprites/input/knight-idle.mp4 into a sprite loop.",
       "expected_output": "Does not ask the user where to put the output. Confirms the run name defaulted from the filename at gate 0b, creates sprites/runs/knight-idle/ inside the project with source/, authority/, frames/, qa/ and output/, writes sprites/.gitignore holding runs/ if the tree is new, and passes those explicit paths to every script. Creates nothing in the home directory or the skill directory. Then continues with the ordinary gates, asking sequence type as its own question."
     }
