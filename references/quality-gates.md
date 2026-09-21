@@ -8,7 +8,7 @@ For one-to-one processing, each mapped native video frame remains pose authority
 
 ## Proof-frame gate
 
-Before batch extraction or generation, inspect one representative proof frame on checkerboard, white, and black at 100% and 4×. Include fragile semantic crops such as face/neck/collar, hair tips, hands/weapons, equipment boundaries, and feet. Record the approved shared parameters in the authority manifest. Do not infer approval from a contact sheet viewed at reduced scale.
+Before batch extraction or generation, render one representative proof frame with `scripts/build_transparency_proof.py` and inspect it on checkerboard, white, and black at 100% and 4×. Record the review with `--accept <reviewer>` only after looking; the delivery gate requires that report, and it rejects an approval that names fewer than all three backgrounds or only one crop scale. Include fragile semantic crops such as face/neck/collar, hair tips, hands/weapons, equipment boundaries, and feet. Record the approved shared parameters in the authority manifest. Do not infer approval from a contact sheet viewed at reduced scale.
 
 Record the scope of approval. Approval of transparency does not approve changed foreground RGB, changed geometry, regeneration, motion transfer, or a final sequence. A method or branch change requires a new proof.
 

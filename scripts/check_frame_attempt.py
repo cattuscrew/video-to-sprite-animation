@@ -347,6 +347,7 @@ def main() -> int:
     neighbour_failures: list[dict[str, object]] = []
     if not args.skip_neighbours:
         contract_path = args.run / "frame-contract.json"
+        approved_transitions: set[str] = set()
         limits = {
             "maximumSilhouetteSpikeRatio": 1.8,
             "maximumVisibleAreaStepRatio": 0.03,
@@ -357,15 +358,22 @@ def main() -> int:
             "maximumCentroidAccelerationPixels": MAX_CENTROID_ACCELERATION,
         }
         if contract_path.is_file():
+            contract = json.loads(contract_path.read_text())
             limits.update(
                 {
                     key: float(value)
-                    for key, value in json.loads(contract_path.read_text())
-                    .get("temporalLimits", {})
-                    .items()
+                    for key, value in contract.get("temporalLimits", {}).items()
                     if key in limits
                 }
             )
+            # The contract's approved transitions apply here too, not only at
+            # final validation. Without them a frame whose own source moves
+            # further than the limit can never pass: the only attempt that
+            # would is one that moves less than the frame it is copying, so
+            # the gate selects against fidelity to the source. The threshold
+            # itself is untouched -- these are the specific transitions the
+            # user approved after seeing the authority's own measurements.
+            approved_transitions = set(contract.get("approvedTemporalTransitions", []))
         metrics = {args.frame: silhouette_metrics(output)}
         for offset in (-2, -1, 1, 2):
             neighbour = args.frame + offset
@@ -376,7 +384,11 @@ def main() -> int:
         for left, right in ((args.frame - 1, args.frame), (args.frame, args.frame + 1)):
             if left in metrics and right in metrics:
                 failure = pair_geometry_failure(
-                    metrics[left], metrics[right], (left, right), limits
+                    metrics[left],
+                    metrics[right],
+                    (left, right),
+                    limits,
+                    approved_transitions,
                 )
                 if failure:
                     neighbour_failures.append(failure)
@@ -389,6 +401,7 @@ def main() -> int:
                     metrics[triple[2]],
                     triple,
                     limits,
+                    approved_transitions,
                 )
                 if failure:
                     neighbour_failures.append(failure)

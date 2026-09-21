@@ -32,7 +32,7 @@ Before source processing, ask exactly one unresolved choice and wait. Do not com
 
 For GPT Image, transparency proof, canonical color reference, color-consistency strategy, and batch execution are four separate gates. A generic “approve” applies only to the single question currently shown.
 
-Any strategy change requires a new proof. Show source/output at full resolution, on black as well as on checkerboard, and reject any zoom, redraw, placement change, or canvas change before asking for batch approval.
+Any strategy change requires a new proof: re-run `scripts/build_transparency_proof.py` and re-accept it, because the delivery gate reads the digest of the frame that was actually approved. Show source/output at full resolution, on black as well as on checkerboard, and reject any zoom, redraw, placement change, or canvas change before asking for batch approval.
 
 ## Prevent independent-frame color drift
 

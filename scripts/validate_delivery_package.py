@@ -16,6 +16,7 @@ from delivery_policy import (
     delivery_mapping_errors,
     delivery_report_errors,
     mapping_manifest_errors,
+    transparency_proof_report_errors,
     visual_qa_report_errors,
 )
 
@@ -49,6 +50,7 @@ def main() -> int:
     parser.add_argument("--source-correspondence-report", type=Path)
     parser.add_argument("--color-stability-report", type=Path)
     parser.add_argument("--visual-qa-report", type=Path, required=True)
+    parser.add_argument("--transparency-proof-report", type=Path, required=True)
     args = parser.parse_args()
 
     errors: list[str] = []
@@ -63,6 +65,9 @@ def main() -> int:
     )
     delivery_report = load_json(args.delivery_report, "delivery report", errors)
     visual_qa_report = load_json(args.visual_qa_report, "visual QA report", errors)
+    proof_report = load_json(
+        args.transparency_proof_report, "transparency proof report", errors
+    )
 
     errors.extend(authority_policy_errors(authority))
     errors.extend(contract_policy_errors(contract))
@@ -74,16 +79,25 @@ def main() -> int:
     errors.extend(delivery_report_errors(delivery_report, authority))
     errors.extend(delivery_mapping_errors(delivery_report, mapping))
     errors.extend(visual_qa_report_errors(visual_qa_report))
-    artifacts = visual_qa_report.get("artifacts", {})
-    if isinstance(artifacts, dict):
+    # The proof gate decides whether the batch runs at all, which is before any
+    # of the reports above exist. Requiring its evidence here is what stops the
+    # batch being approved off whichever view happened to get rendered.
+    errors.extend(transparency_proof_report_errors(proof_report))
+    for label, report, base in (
+        ("visual QA", visual_qa_report, args.visual_qa_report.parent),
+        ("transparency proof", proof_report, args.transparency_proof_report.parent),
+    ):
+        artifacts = report.get("artifacts", {})
+        if not isinstance(artifacts, dict):
+            continue
         for name, value in artifacts.items():
             if not isinstance(value, str) or not value:
                 continue
             path = Path(value)
             if not path.is_absolute():
-                path = args.visual_qa_report.parent / path
+                path = base / path
             if not path.exists():
-                errors.append(f"visual QA artifact does not exist: {name}")
+                errors.append(f"{label} artifact does not exist: {name}")
     accepted(frame_report, "frame validation report", errors)
     accepted(temporal_report, "temporal validation report", errors)
     # Colour flicker is invisible to every other report here: the per-frame
@@ -143,6 +157,7 @@ def main() -> int:
                 else None
             ),
             "visualQaReport": str(args.visual_qa_report.resolve()),
+            "transparencyProofReport": str(args.transparency_proof_report.resolve()),
         },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

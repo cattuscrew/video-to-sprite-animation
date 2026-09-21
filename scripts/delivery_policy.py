@@ -399,3 +399,52 @@ def visual_qa_report_errors(report: dict[str, Any]) -> list[str]:
     if reviewer not in {"agent", "user", "agent-and-user"}:
         errors.append("visual QA report has invalid reviewer")
     return errors
+
+
+def transparency_proof_report_errors(report: dict[str, Any]) -> list[str]:
+    """Require the proof to have been seen on all three backgrounds.
+
+    A contaminated or ragged matte is close to invisible against a mid-tone
+    check pattern and obvious against black, so an approval taken on the
+    checkerboard alone is an approval that could not have caught the defect.
+    The backgrounds and crop scales are named rather than assumed for the same
+    reason: the report has to say which views the reviewer actually had.
+    """
+    errors: list[str] = []
+    if report.get("status") != "accepted":
+        errors.append("transparency proof report status is not accepted")
+    if report.get("userApproved") is not True:
+        errors.append("transparency proof is not user-approved")
+    reviewer = report.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer:
+        errors.append("transparency proof report lacks a reviewer")
+    rendered = report.get("backgroundsRendered")
+    rendered = set(rendered) if isinstance(rendered, list) else set()
+    for background in ("checkerboard", "white", "black"):
+        if background not in rendered:
+            errors.append(f"transparency proof was not rendered on {background}")
+    scales = report.get("cropScales")
+    scales = [s for s in scales if isinstance(s, (int, float))] if isinstance(scales, list) else []
+    # 100% says whether it reads correctly; the magnified view is the only one a
+    # two-pixel halo shows up in. Neither substitutes for the other.
+    if not any(abs(float(s) - 1.0) < 1e-6 for s in scales):
+        errors.append("transparency proof lacks 100% fragile-region crops")
+    if not any(float(s) >= 2.0 for s in scales):
+        errors.append("transparency proof lacks magnified fragile-region crops")
+    proof = report.get("proofFrame")
+    if not isinstance(proof, dict):
+        errors.append("transparency proof report lacks proofFrame")
+    else:
+        digest = proof.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            errors.append("transparency proof frame lacks SHA-256")
+        if not proof.get("path"):
+            errors.append("transparency proof frame lacks path")
+    artifacts = report.get("artifacts")
+    if not isinstance(artifacts, dict):
+        errors.append("transparency proof report lacks artifact paths")
+    else:
+        for field in ("backgroundProof", "fragileCrops100", "fragileCropsMagnified"):
+            if not artifacts.get(field):
+                errors.append(f"transparency proof report lacks {field} artifact")
+    return errors
