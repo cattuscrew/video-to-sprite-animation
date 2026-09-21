@@ -75,6 +75,16 @@
       "id": 15,
       "prompt": "Remove the green fringe from every transparent edge in this batch.",
       "expected_output": "Measures how much of the soft edge is actually background-coloured before treating any of it. Does not unmix the whole edge against the screen colour: where the artwork has a dark keyline that drives green negative and leaves a magenta fringe. Never uses a chroma test to write a delivered alpha channel; built-in GPT Image decides transparency."
+    },
+    {
+      "id": 16,
+      "prompt": "start",
+      "expected_output": "Treats the missing source as the state before gate 0 rather than an error. Scans the project's sprites/input/ and asks one question -- which clip -- offering the two or three most recent videos with their FPS, duration and resolution plus 'another path'. Does not emit a prose template, a checklist of settings to fill in, or a request to supply an absolute path, and does not treat 'start' as a required keyword. Creates no directories before a source is known, and none outside the project."
+    },
+    {
+      "id": 17,
+      "prompt": "Turn sprites/input/knight-idle.mp4 into a sprite loop.",
+      "expected_output": "Does not ask the user where to put the output. Confirms the run name defaulted from the filename at gate 0b, creates sprites/runs/knight-idle/ inside the project with source/, authority/, frames/, qa/ and output/, writes sprites/.gitignore holding runs/ if the tree is new, and passes those explicit paths to every script. Creates nothing in the home directory or the skill directory. Then continues with the ordinary gates, asking sequence type as its own question."
     }
   ]
 }
